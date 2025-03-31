@@ -112,23 +112,56 @@ def format_data(samples: dict[str, any]) -> dict[str, list]:
 
 
 # For multi-image example
-def prepare_dataset(dataset: DatasetDict, dataset_name: str, dataset_train_split: str) -> DatasetDict:
-    all_files = list_repo_files(dataset_name, repo_type="dataset")
-    zip_files = [f for f in all_files if f.endswith(".zip")]
-
-    for zip_filename in zip_files:
-        zip_path = hf_hub_download(repo_id=dataset_name, filename=zip_filename, repo_type="dataset")
-        extract_folder = zip_filename.replace(".zip", "")
-        os.makedirs(extract_folder, exist_ok=True)
-
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(extract_folder)
-
-    dataset = dataset.map(format_data, batched=True, batch_size=4, num_proc=16)
+def prepare_dataset(dataset: DatasetDict, dataset_name: str, dataset_train_split: str, max_samples: int = None) -> DatasetDict:
+    from huggingface_hub import hf_hub_download
+    import zipfile
+    import os
+    
+    # Download the images.zip file from the dataset repository
+    print(f"Downloading images.zip from {dataset_name}...")
+    zip_path = hf_hub_download(
+        repo_id=dataset_name,
+        filename="images.zip",
+        repo_type="dataset"
+    )
+    
+    # Create images directory if it doesn't exist
+    if not os.path.exists("images"):
+        os.makedirs("images")
+    
+    # Extract the zip file
+    print(f"Extracting images.zip to current directory...")
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        zip_ref.extractall("./")
+    
+    # Verify extraction
+    if not os.path.exists("images"):
+        raise ValueError("Images directory not found after extraction")
+    
+    image_files = os.listdir("images")
+    print(f"Extracted {len(image_files)} image files")
+    
+    # Limit the number of samples if max_samples is specified
+    if max_samples is not None and max_samples > 0:
+        print(f"Limiting dataset to {max_samples} samples")
+        dataset[dataset_train_split] = dataset[dataset_train_split].select(range(min(max_samples, len(dataset[dataset_train_split]))))
+    
+    # Process the dataset
+    print(f"Processing dataset with {len(dataset[dataset_train_split])} samples...")
+    dataset = dataset.map(format_data, batched=True, batch_size=8, num_proc=12)
     return dataset
 
 
 def main():
+    # First parse our custom argument
+    import argparse
+    custom_parser = argparse.ArgumentParser(add_help=False)
+    custom_parser.add_argument("--max_samples", type=int, default=None)
+    custom_args, remaining_args = custom_parser.parse_known_args()
+    
+    # Then use TrlParser for the rest
+    import sys
+    sys.argv = [sys.argv[0]] + remaining_args
     parser = TrlParser((ScriptArguments, SFTConfig, ModelConfig))
     script_args, training_args, model_args = parser.parse_args_and_config()
     training_args.gradient_checkpointing_kwargs = dict(use_reentrant=False)
@@ -189,8 +222,8 @@ def main():
     # Dataset
     ################
     dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
-    if script_args.dataset_name == "FanqingM/MMIU-Benchmark":
-        dataset = prepare_dataset(dataset, script_args.dataset_name, script_args.dataset_train_split)
+    if script_args.dataset_name == "FanqingM/MMIU-Benchmark" or script_args.dataset_name == "yali30/findingdory-val-subsampled-48":
+        dataset = prepare_dataset(dataset, script_args.dataset_name, script_args.dataset_train_split, custom_args.max_samples)
 
     ################
     # Training

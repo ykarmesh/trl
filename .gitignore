@@ -143,3 +143,9 @@ checklink/cookies.txt
 nbs/wandb/
 examples/notebooks/wandb/
 wandb/
+hf_datasets/
+models/
+memorybench/keyframe_dataset
+images/
+slurm_logs/
+runs/

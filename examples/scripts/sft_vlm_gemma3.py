@@ -48,7 +48,7 @@ accelerate launch \
 import io
 import os
 import zipfile
-
+import numpy as np
 import torch
 from datasets import DatasetDict, load_dataset
 from huggingface_hub import hf_hub_download, list_repo_files
@@ -87,11 +87,25 @@ def process_vision_info(messages: list[dict]) -> list[Image.Image]:
     return image_inputs
 
 
-def format_data(samples: dict[str, any]) -> dict[str, list]:
+def format_data(samples: dict[str, any], max_images: int = 8) -> dict[str, list]:
     formatted_samples = {"messages": []}
     for cont in range(len(samples["question"])):
         images = []
-        for img_path in samples["input_image_path"][cont]:
+        # Get all image paths for this sample
+        all_img_paths = samples["input_image_path"][cont]
+        
+        # Select only max_images (8) images
+        # Option 1: Take the first 8 images
+        # selected_img_paths = all_img_paths[:max_images]
+        
+        # Option 2: Or take evenly spaced images to cover the whole sequence
+        if len(all_img_paths) > max_images:
+            indices = np.linspace(0, len(all_img_paths) - 1, max_images, dtype=int)
+            selected_img_paths = [all_img_paths[i] for i in indices]
+        else:
+            selected_img_paths = all_img_paths
+                
+        for img_path in selected_img_paths:
             try:
                 with open(img_path, "rb") as f:
                     img_bytes = f.read()
@@ -112,7 +126,7 @@ def format_data(samples: dict[str, any]) -> dict[str, list]:
 
 
 # For multi-image example
-def prepare_dataset(dataset: DatasetDict, dataset_name: str, dataset_train_split: str, max_samples: int = None) -> DatasetDict:
+def prepare_dataset(dataset: DatasetDict, dataset_name: str, dataset_train_split: str, max_samples: int = None, max_images: int = 8) -> DatasetDict:
     from huggingface_hub import hf_hub_download
     import zipfile
     import os
@@ -146,17 +160,22 @@ def prepare_dataset(dataset: DatasetDict, dataset_name: str, dataset_train_split
         print(f"Limiting dataset to {max_samples} samples")
         dataset[dataset_train_split] = dataset[dataset_train_split].select(range(min(max_samples, len(dataset[dataset_train_split]))))
     
-    # Process the dataset
-    print(f"Processing dataset with {len(dataset[dataset_train_split])} samples...")
-    dataset = dataset.map(format_data, batched=True, batch_size=8, num_proc=12)
+    # Process the dataset with the max_images parameter
+    dataset = dataset.map(
+        lambda samples: format_data(samples, max_images=max_images), 
+        batched=True, 
+        batch_size=16, 
+        num_proc=12
+    )
     return dataset
 
 
 def main():
-    # First parse our custom argument
+    # First parse our custom arguments
     import argparse
     custom_parser = argparse.ArgumentParser(add_help=False)
     custom_parser.add_argument("--max_samples", type=int, default=None)
+    custom_parser.add_argument("--max_images", type=int, default=8, help="Maximum number of images to use per sample")
     custom_args, remaining_args = custom_parser.parse_known_args()
     
     # Then use TrlParser for the rest
@@ -175,6 +194,11 @@ def main():
         model_args.torch_dtype if model_args.torch_dtype in ["auto", None] else getattr(torch, model_args.torch_dtype)
     )
     quantization_config = get_quantization_config(model_args)
+    
+    # Hardcode to use 'eager' attention implementation for Gemma-3
+    model_args.attn_implementation = "eager"
+    print(f"Hardcoding attention implementation to {model_args.attn_implementation} for Gemma-3")
+    
     model_kwargs = dict(
         revision=model_args.model_revision,
         attn_implementation=model_args.attn_implementation,
@@ -221,9 +245,17 @@ def main():
     ################
     # Dataset
     ################
+    print(f"Using num_samples: {custom_args.max_samples}")
+    print(f"Using num_images: {custom_args.max_images}")
     dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
     if script_args.dataset_name == "FanqingM/MMIU-Benchmark" or script_args.dataset_name == "yali30/findingdory-val-subsampled-48":
-        dataset = prepare_dataset(dataset, script_args.dataset_name, script_args.dataset_train_split, custom_args.max_samples)
+        dataset = prepare_dataset(
+            dataset, 
+            script_args.dataset_name, 
+            script_args.dataset_train_split, 
+            custom_args.max_samples,
+            custom_args.max_images
+        )
 
     ################
     # Training

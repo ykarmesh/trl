@@ -56,8 +56,18 @@ from peft import LoraConfig
 from qwen_vl_utils import process_vision_info
 from transformers import AutoModelForVision2Seq, AutoProcessor, BitsAndBytesConfig, Qwen2VLProcessor
 
-from trl import ModelConfig, ScriptArguments, SFTConfig, SFTTrainer, TrlParser, get_kbit_device_map
+from trl import (
+    ModelConfig,
+    ScriptArguments,
+    SFTConfig,
+    SFTTrainer,
+    TrlParser,
+    get_kbit_device_map,
+    get_peft_config,
+    get_quantization_config,
+)
 
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 def download_video(url: str, cache_dir: str) -> str:
     """Download video if not already present locally."""
@@ -78,6 +88,30 @@ def download_video(url: str, cache_dir: str) -> str:
         return local_path
     except requests.RequestException as e:
         raise Exception(f"Failed to download video: {e}") from e
+
+
+def prepare_custom_dataset(example: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Prepare custom dataset example for training (specifically for findingdory dataset)."""
+    video_path = example["video_path"]
+    qa_pairs = json.loads(example["qa"])
+
+    system_message = "You are an expert and intelligent question answering agent. You will be shown a video that was collected by a robot yesterday while navigating around a house and picking and placing objects. Each frame in the video has a unique frame index in the top left corner of the video along with the time of day information. Your job is to help the robot complete a task today by looking at the video and finding the frame indices that the robot should move to. Note: The robot uses a magic grasp action to pick up an object, where a gripper goes close to the object and the object gets magically picked up. When deciding which frame indices to choose, make sure you choose the frame indices that are closest to the object/place."
+    
+    qa_pair = qa_pairs[0]
+
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": system_message}]},
+        {
+            "role": "user",
+            "content": [
+                {"type": "video", "video": video_path, "max_pixels": 360 * 420, "fps": 1.0},
+                {"type": "text", "text": qa_pair["question"]},
+            ],
+        },
+        {"role": "assistant", "content": [{"type": "text", "text": qa_pair["answer"]}]},
+    ]
+
+    return {"messages": messages}
 
 
 def prepare_dataset(example: dict[str, Any], cache_dir: str) -> dict[str, list[dict[str, Any]]]:
@@ -181,33 +215,18 @@ if __name__ == "__main__":
         model_args.torch_dtype if model_args.torch_dtype in ["auto", None] else getattr(torch, model_args.torch_dtype)
     )
 
-    # Quantization configuration for 4-bit training
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-    )
-
     # Model initialization
     model_kwargs = dict(
         revision=model_args.model_revision,
         trust_remote_code=model_args.trust_remote_code,
         torch_dtype=torch_dtype,
         device_map=get_kbit_device_map(),
-        quantization_config=bnb_config,
+        quantization_config=get_quantization_config(model_args),
+        attn_implementation=model_args.attn_implementation,
+        use_cache=False,
     )
 
     model = AutoModelForVision2Seq.from_pretrained(model_args.model_name_or_path, **model_kwargs)
-
-    peft_config = LoraConfig(
-        task_type="CAUSAL_LM",
-        r=16,
-        lora_alpha=16,
-        lora_dropout=0.1,
-        bias="none",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-    )
 
     # Configure model modules for gradients
     if training_args.gradient_checkpointing:
@@ -220,11 +239,14 @@ if __name__ == "__main__":
     )
 
     # Prepare dataset
-    prepared_dataset = [prepare_dataset(example, script_args.video_cache_dir) for example in dataset]
-
+    if script_args.dataset_name == "yali30/findingdory-val-subsampled-48-qwen":
+        prepared_dataset = [prepare_custom_dataset(example) for example in dataset]
+    else:   
+        prepared_dataset = [prepare_dataset(example, script_args.video_cache_dir) for example in dataset]
+    
     # Initialize wandb if specified
     if training_args.report_to == "wandb":
-        wandb.init(project="video-llm-training")
+        wandb.init(project="memorybench_sft_video_llm")
 
     # Initialize trainer
     trainer = SFTTrainer(
@@ -232,8 +254,9 @@ if __name__ == "__main__":
         args=training_args,
         train_dataset=prepared_dataset,
         data_collator=collate_fn,
-        peft_config=peft_config,
-        tokenizer=processor.tokenizer,
+        peft_config=get_peft_config(model_args),
+        # tokenizer=processor.tokenizer,
+        processing_class=processor.tokenizer,
     )
 
     # Train model

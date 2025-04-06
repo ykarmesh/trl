@@ -58,4 +58,5 @@ accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml
     --lora_alpha 16 \
     --lora_dropout 0.1 \
     --lora_target_modules all-linear \
-    --gradient_checkpointing
+    --gradient_checkpointing \
+    --use_liger_kernel

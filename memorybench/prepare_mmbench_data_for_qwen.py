@@ -10,10 +10,10 @@ import pandas as pd
 import getpass
 
 # Define paths
-video_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_48/interaction_videos"
-json_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_48/vlm_inference_results"
-output_dir = "/srv/flash1/yali30/code/trl/memorybench/keyframe_dataset_qwen"
-original_dataset_path = "/srv/flash1/kyadav32/code/gunshi/memorybench/memorybench/data/datasets/hssd/memory_dataset/balanced_mmbench_dataset_v2/val/combined_episodes_with_pddl_subset_cleaned_all_instr_5.json.gz"
+video_root_dir = "/coc/testnvme/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_48/interaction_videos"
+json_root_dir = "/coc/testnvme/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_48/vlm_inference_results"
+output_dir = "/coc/testnvme/yali30/code/trl/memorybench/generated_data/keyframe_dataset_qwen_updated"
+original_dataset_path = "/coc/testnvme/kyadav32/code/gunshi/memorybench/memorybench/data/datasets/hssd/memory_dataset/balanced_mmbench_dataset_v2/val/combined_episodes_with_pddl_subset_cleaned_all_instr_5.json.gz"
 # hf_dataset_name = "yali30/findingdory-val-subsampled-48-qwen"
 
 # list of valid tasks
@@ -96,31 +96,6 @@ for episode in original_dataset['episodes']:
 
     task_goals[episode['episode_id']] = cur_ep_task_goal
     
-# Function to extract all frames from a video
-def extract_all_frames(video_path, output_prefix):
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"Error opening video file: {video_path}")
-        return []
-    
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    frame_paths = []
-    
-    for idx in range(frame_count):
-        # Set the position of the video file to the frame
-        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-        ret, frame = cap.read()
-        if ret:
-            frame_path = f"{output_prefix}_frame_{idx}.jpg"
-            full_path = os.path.join(images_dir, frame_path)
-            cv2.imwrite(full_path, frame)
-            frame_paths.append(os.path.join("images", frame_path))
-        else:
-            print(f"Failed to extract frame {idx} from {video_path}")
-    
-    cap.release()
-    return frame_paths
-
 # Process all episodes and tasks
 dataset_entries = []
 processed_videos = {}  # Cache to avoid re-extracting frames from the same video
@@ -170,12 +145,28 @@ for ep_id in tqdm(os.listdir(video_root_dir)):
         assert "assigns" in task_data, f"No assigns found for task {task_id}"
         
         # Check if there's a traversal order specified
-        if "assign_traversal_order" in task_data:
-            # Use the specified traversal order
-            for assign_key in task_data["assign_traversal_order"]:
-                if assign_key in task_data.get("assigns", {}):
-                    keyframes = task_data["assigns"][assign_key].get("keyframes", [])
-                    assign_keyframes.append(sorted(keyframes))
+        if task_id in multi_goal_tasks:
+            # Use the specified traversal order to store the individual assign keyframes
+            if "assign_traversal_order" in task_data:
+                for assign_key in task_data["assign_traversal_order"]:
+                    if assign_key in task_data.get("assigns", {}):
+                        keyframes = task_data["assigns"][assign_key].get("keyframes", [])
+                        assign_keyframes.append(sorted(keyframes))
+                        all_keyframes.update(keyframes)
+            else:
+                # Traverse the assigns dictionary, sort each assign keyframe list in ascending order
+                # Then append the keyframes list to assign_keyframes in ascending order of the first keyframe index
+                sorted_assigns = []
+                for assign_key, assign_data in task_data.get("assigns", {}).items():
+                    keyframes = assign_data.get("keyframes", [])
+                    sorted_keyframes = sorted(keyframes)
+                    # Store the sorted keyframes along with their first index (or infinity if empty)
+                    first_index = sorted_keyframes[0] if sorted_keyframes else float('inf')
+                    sorted_assigns.append((first_index, sorted_keyframes))
+                
+                # Sort by the first keyframe index and append to assign_keyframes
+                for _, keyframes in sorted(sorted_assigns):
+                    assign_keyframes.append(keyframes)
                     all_keyframes.update(keyframes)
         else:
             # No traversal order, use the order in the assigns dictionary
@@ -186,22 +177,23 @@ for ep_id in tqdm(os.listdir(video_root_dir)):
         
         # Create dataset entry with appropriate output based on keyframes
         if task_id in multi_goal_tasks:
-            # For multi-goal tasks, provide a list of keyframes for each entity without IDs
-            output_lines = ["Solution keyframes for each entity:"]
-            for i, keyframes in enumerate(assign_keyframes, 1):
+            # For multi-goal tasks, provide a list of keyframes for each entity as a list of lists
+            keyframe_lists = []
+            for keyframes in assign_keyframes:
                 if keyframes:
-                    output_lines.append(f"Entity {i}: {', '.join([str(idx) for idx in keyframes])}")
+                    keyframe_lists.append(keyframes)
                 else:
-                    output_lines.append(f"Entity {i}: No valid keyframe")
-            output_text = "\n".join(output_lines)
+                    keyframe_lists.append([])
+            output_text = json.dumps(keyframe_lists)
         else:
-            # For single-goal tasks, the model can choose any valid keyframe
+            # For single-goal tasks, also use a list of lists format with a single inner list
             if len(all_keyframes) > 0:
                 keyframe_indices = sorted(list(all_keyframes))
-                output_text = f"The solution keyframes are: {', '.join([str(idx) for idx in keyframe_indices])}."
+                keyframe_lists = [keyframe_indices]  # Single list inside a list
             else:
-                output_text = "No frame solves the task."
-        
+                keyframe_lists = [[]]  # Empty list inside a list
+            output_text = json.dumps(keyframe_lists)
+                    
         task_goal = task_goals[ep_id][task_id]
         
         # Create entry in the new format
@@ -222,25 +214,39 @@ df = pd.DataFrame(dataset_entries)
 # Create a Hugging Face Dataset
 dataset = Dataset.from_pandas(df)
 
-# Split the dataset (80% train, 10% validation, 10% test)
-# You can adjust these ratios as needed
-dataset_splits = dataset.train_test_split(test_size=0.2, seed=42)
-test_valid = dataset_splits["test"].train_test_split(test_size=0.5, seed=42)
+# Make dataset splitting configurable
+use_empty_splits = True  # Set to False if you want actual data splits
 
-# Create the final DatasetDict with all splits
-dataset_dict = DatasetDict({
-    "train": dataset_splits["train"],
-    "validation": test_valid["train"],
-    "test": test_valid["test"]
-})
+if use_empty_splits:
+    # Create empty validation and test splits with proper column types
+    # Create a copy of the main dataset and remove all rows
+    empty_dataset = dataset.select([])
+    
+    # Create the dataset dict with empty validation and test splits
+    dataset_dict = DatasetDict({
+        "train": dataset,
+        "validation": empty_dataset,
+        "test": empty_dataset
+    })
+else:
+    # Split the dataset (80% train, 10% validation, 10% test)
+    dataset_splits = dataset.train_test_split(test_size=0.2, seed=42)
+    test_valid = dataset_splits["test"].train_test_split(test_size=0.5, seed=42)
+    
+    # Create the final DatasetDict with all splits
+    dataset_dict = DatasetDict({
+        "train": dataset_splits["train"],
+        "validation": test_valid["train"],
+        "test": test_valid["test"]
+    })
 
 # Save the dataset in Hugging Face format
 dataset_dict.save_to_disk(output_dir)
 
 print(f"Dataset created with {len(dataset_entries)} entries and saved to {output_dir}")
 print(f"  - Train set: {len(dataset_dict['train'])} examples")
-print(f"  - Validation set: {len(dataset_dict['validation'])} examples")
-print(f"  - Test set: {len(dataset_dict['test'])} examples")
+print(f"  - Validation set: {len(dataset_dict['validation'])} examples {'(empty)' if use_empty_splits else ''}")
+print(f"  - Test set: {len(dataset_dict['test'])} examples {'(empty)' if use_empty_splits else ''}")
 
 # Create a metadata file with information about the dataset structure
 metadata = {
@@ -270,8 +276,8 @@ with open(os.path.join(output_dir, "README.md"), 'w') as f:
 ## Statistics
 - Total examples: {len(dataset_entries)}
 - Train set: {len(dataset_dict['train'])} examples
-- Validation set: {len(dataset_dict['validation'])} examples
-- Test set: {len(dataset_dict['test'])} examples
+- Validation set: {len(dataset_dict['validation'])} examples {'(empty)' if use_empty_splits else ''}
+- Test set: {len(dataset_dict['test'])} examples {'(empty)' if use_empty_splits else ''}
 """)
 
 print(f"Dataset README saved to {os.path.join(output_dir, 'README.md')}")
@@ -296,8 +302,17 @@ if upload_to_hub:
             
         # Create the repository and upload
         api = HfApi()
-        print(f"Creating dataset repository: {hf_dataset_name}")
-        api.create_repo(repo_id=hf_dataset_name, repo_type="dataset")
+        
+        # Check if the repository already exists
+        try:
+            print(f"Creating dataset repository: {hf_dataset_name}")
+            api.create_repo(repo_id=hf_dataset_name, repo_type="dataset")
+            print(f"Repository created successfully.")
+        except Exception as repo_error:
+            if "You already created this dataset repo" in str(repo_error) or "409 Client Error" in str(repo_error):
+                print(f"Repository {hf_dataset_name} already exists. Will upload to the existing repository.")
+            else:
+                raise repo_error
         
         print(f"Uploading dataset to {hf_dataset_name}...")
         dataset_dict.push_to_hub(hf_dataset_name)

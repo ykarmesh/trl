@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=mmbench_sample
-#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/subsample_48_sft/val-8-imgs-full_dataset-64-samples-zero2-GC-%j.out
-#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/subsample_48_sft/val-8-imgs-full_dataset-64-samples-zero2-GC-%j.err
+#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen/val-48-imgs-zero2-%j.out
+#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen/val-48-imgs-zero2-%j.err
 #SBATCH --gpus=a40:8
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=12
 #SBATCH --ntasks-per-node=1
 #SBATCH --exclude=gideon,irona,calculon,bb8,walle
 #SBATCH --qos="short"
-#SBATCH --partition=kira-lab
+#SBATCH --partition=overcap
 #SBATCH --requeue
 #SBATCH --signal=USR1@100
 
@@ -30,9 +30,9 @@ accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml
     --dataset_name yali30/findingdory-val-subsampled-48-qwen \
     --dataset_train_split train \
     --model_name_or_path Qwen/Qwen2.5-VL-3B-Instruct \
-    --per_device_train_batch_size 1 \
+    --per_device_train_batch_size 8 \
     --gradient_accumulation_steps 4 \
-    --num_train_epochs 10 \
+    --num_train_epochs 50 \
     --push_to_hub False \
     --logging_steps 1 \
     --log_level debug \
@@ -41,7 +41,7 @@ accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml
     --save_steps 300 \
     --report_to wandb \
     --push_to_hub False \
-    --output_dir runs/qwen-videos-sft-48-frames \
+    --output_dir runs/qwen-videos-sft-48-frames-liger-final-2-zero3 \
     --optim adamw_torch_fused \
     --learning_rate 8e-5 \
     --max_grad_norm 0.3 \

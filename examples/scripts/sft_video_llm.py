@@ -157,7 +157,7 @@ def collate_fn(examples: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
                 for content in message["content"]
                 if content.get("type") == "video"
             )
-            print(f"Processing video: {os.path.basename(video_path)}")
+            # print(f"Processing video: {os.path.basename(video_path)}")
 
             texts.append(processor.apply_chat_template(example["messages"], tokenize=False))
             video_input = process_vision_info(example["messages"])[1][0]

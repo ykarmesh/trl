@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=mmbench_sample
-#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen/val-48-imgs-patched-lr2e4-3B-%j.out
-#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen/val-48-imgs-patched-lr2e4-3B-%j.err
+#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen/val-48-imgs-patched-rank16-alpha4-lr2e4-3B-%j.out
+#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen/val-48-imgs-patched-rank16-alpha4-lr2e4-3B-%j.err
 #SBATCH --gpus=a40:8
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=12
@@ -41,7 +41,7 @@ accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml
     --save_steps 100 \
     --report_to wandb \
     --push_to_hub False \
-    --output_dir runs/qwen-videos-sft-48-frames-liger-patched-lr2e4-3B \
+    --output_dir runs/qwen-videos-sft-48-frames-liger-patched-rank16-alpha4-lr2e4-3B \
     --optim adamw_torch_fused \
     --learning_rate 2e-4 \
     --max_grad_norm 0.3 \
@@ -55,7 +55,7 @@ accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml
     --attn_implementation flash_attention_2 \
     --use_peft \
     --lora_r 16 \
-    --lora_alpha 16 \
+    --lora_alpha 4 \
     --lora_dropout 0.1 \
     --lora_target_modules all-linear \
     --gradient_checkpointing \

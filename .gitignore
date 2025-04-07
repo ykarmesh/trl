@@ -145,7 +145,7 @@ examples/notebooks/wandb/
 wandb/
 hf_datasets/
 models/
-memorybench/keyframe_dataset
+memorybench/generated_data
 images/
 slurm_logs/
 runs/

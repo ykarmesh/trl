@@ -169,14 +169,17 @@ def collate_fn(examples: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
 
     labels = inputs["input_ids"].clone()
     labels[labels == processor.tokenizer.pad_token_id] = -100
-
+    
     # Handle visual tokens based on processor type
     visual_tokens = (
         [151652, 151653, 151656]
         if isinstance(processor, Qwen2VLProcessor)
-        else [processor.tokenizer.convert_tokens_to_ids(processor.image_token)]
+        else [
+            processor.tokenizer.convert_tokens_to_ids(processor.image_token),
+            processor.tokenizer.convert_tokens_to_ids(processor.video_token)
+        ]
     )
-
+    
     for visual_token_id in visual_tokens:
         labels[labels == visual_token_id] = -100
 
@@ -195,6 +198,7 @@ class CustomScriptArguments(ScriptArguments):
     """
 
     video_cache_dir: str = field(default="/tmp/videos/", metadata={"help": "Video cache directory."})
+    max_samples: int = field(default=-1, metadata={"help": "Maximum number of samples to use for training."})
 
 
 if __name__ == "__main__":
@@ -239,6 +243,12 @@ if __name__ == "__main__":
     )
 
     # Prepare dataset
+    if script_args.max_samples != -1:
+        dataset = dataset.select(range(script_args.max_samples))
+        print(f"Using {len(dataset)} samples for training.")
+    else:
+        print(f"Using all {len(dataset)} samples for training.")
+
     if script_args.dataset_name == "yali30/findingdory-val-subsampled-48-qwen":
         prepared_dataset = [prepare_custom_dataset(example) for example in dataset]
     else:   

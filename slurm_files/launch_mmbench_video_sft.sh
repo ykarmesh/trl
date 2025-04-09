@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=mmbench_sample
-#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen/val-48-imgs-patched-rank16-alpha4-lr2e4-3B-%j.out
-#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen/val-48-imgs-patched-rank16-alpha4-lr2e4-3B-%j.err
+#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train/48-full-ft-lr8e5-epoch5-3B-%j.out
+#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train/48-full-ft-lr8e5-epoch5-3B-%j.err
 #SBATCH --gpus=a40:8
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=12
@@ -27,36 +27,37 @@ cd /coc/testnvme/yali30/code/trl
 
 accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml \
     examples/scripts/sft_video_llm.py \
-    --dataset_name yali30/findingdory-val-subsampled-48-qwen \
+    --dataset_name yali30/findingdory-train-subsampled-48-qwen \
     --dataset_train_split train \
     --model_name_or_path Qwen/Qwen2.5-VL-3B-Instruct \
-    --per_device_train_batch_size 10 \
+    --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
-    --num_train_epochs 50 \
+    --num_train_epochs 5 \
     --push_to_hub False \
     --logging_steps 1 \
     --log_level debug \
     --log_level_replica debug \
     --save_strategy steps \
-    --save_steps 100 \
+    --save_steps 50 \
     --report_to wandb \
     --push_to_hub False \
-    --output_dir runs/qwen-videos-sft-48-frames-liger-patched-rank16-alpha4-lr2e4-3B \
+    --output_dir runs/qwen-videos-sft-48-train-full-ft-lr8e5-epoch5-3B \
     --optim adamw_torch_fused \
-    --learning_rate 2e-4 \
+    --learning_rate 8e-5 \
     --max_grad_norm 0.3 \
     --warmup_ratio 0.1 \
     --lr_scheduler_type cosine \
-    --load_in_4bit \
     --bf16 True \
     --tf32 True \
     --torch_dtype bfloat16 \
-    --use_bnb_nested_quant \
     --attn_implementation flash_attention_2 \
-    --use_peft \
-    --lora_r 16 \
-    --lora_alpha 4 \
-    --lora_dropout 0.1 \
-    --lora_target_modules all-linear \
     --gradient_checkpointing \
     --use_liger_kernel
+
+# --use_peft \
+# --load_in_4bit \
+# --lora_r 4 \
+# --lora_alpha 16 \
+# --lora_dropout 0.1 \
+# --lora_target_modules all-linear \
+# --use_bnb_nested_quant \

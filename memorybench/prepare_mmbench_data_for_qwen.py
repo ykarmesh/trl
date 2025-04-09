@@ -10,11 +10,12 @@ import pandas as pd
 import getpass
 
 # Define paths
-video_root_dir = "/coc/testnvme/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_48/interaction_videos"
-json_root_dir = "/coc/testnvme/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_48/vlm_inference_results"
-output_dir = "/coc/testnvme/yali30/code/trl/memorybench/generated_data/keyframe_dataset_qwen_updated"
-original_dataset_path = "/coc/testnvme/kyadav32/code/gunshi/memorybench/memorybench/data/datasets/hssd/memory_dataset/balanced_mmbench_dataset_v2/val/combined_episodes_with_pddl_subset_cleaned_all_instr_5.json.gz"
-# hf_dataset_name = "yali30/findingdory-val-subsampled-48-qwen"
+video_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_train_evals/subsampled_48/interaction_videos"
+json_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_train_evals/subsampled_48/vlm_inference_results"
+output_dir = "/coc/testnvme/yali30/code/trl/memorybench/generated_data/keyframe_train_dataset_qwen_updated"
+original_dataset_path = "/coc/testnvme/yali30/code/memorybench_dev/new_data/balanced_mmbench_dataset_v2/train/imagenav_cleaned_episodes_latest_instr.json.gz"
+# hf_dataset_name = "yali30/findingdory-train-subsampled-48-qwen"
+use_empty_splits = True  # Set to False if you want actual data splits -- # Make dataset splitting configurable
 
 # list of valid tasks
 valid_tasks = [
@@ -56,11 +57,11 @@ valid_tasks = [
     "task_45",
     "task_46",
     "task_47",
-    "task_48",
-    "task_49",
-    "task_50",
-    "task_51",
-    "task_52",
+    # "task_48", # skip for train episodes
+    # "task_49", # skip for train episodes
+    # "task_50", # skip for train episodes
+    # "task_51", # skip for train episodes
+    # "task_52", # skip for train episodes
     "task_53",
     "task_54",
     "task_55",
@@ -106,7 +107,9 @@ for ep_id in tqdm(os.listdir(video_root_dir)):
     
     # Find the video file
     video_files = [f for f in os.listdir(os.path.join(video_root_dir, ep_id)) if f.endswith('.mp4')]
-    assert len(video_files) == 1, f"Expected 1 video file for episode {ep_id}, found {len(video_files)}"
+    if len(video_files) != 1:
+        print(f"Skipping episode {ep_id} because it has {len(video_files)} video files but expected a single video file !")
+        continue
     
     video_path = os.path.join(video_root_dir, ep_id, video_files[0])
     # Get absolute path to ensure it works from any directory
@@ -132,7 +135,7 @@ for ep_id in tqdm(os.listdir(video_root_dir)):
         task_id = task_file.split('.')[0]
         # skip tasks that are not in the valid_tasks list
         if task_id not in valid_tasks:
-            print(f"skipping {task_id} because it is not in the valid_tasks list")
+            # print(f"skipping {task_id} because it is not in the valid_tasks list")
             continue
         
         task_path = os.path.join(json_ep_dir, task_file)
@@ -213,9 +216,6 @@ df = pd.DataFrame(dataset_entries)
 
 # Create a Hugging Face Dataset
 dataset = Dataset.from_pandas(df)
-
-# Make dataset splitting configurable
-use_empty_splits = True  # Set to False if you want actual data splits
 
 if use_empty_splits:
     # Create empty validation and test splits with proper column types

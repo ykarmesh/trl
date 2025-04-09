@@ -249,7 +249,7 @@ if __name__ == "__main__":
     else:
         print(f"Using all {len(dataset)} samples for training.")
 
-    if script_args.dataset_name == "yali30/findingdory-val-subsampled-48-qwen":
+    if script_args.dataset_name == "yali30/findingdory-val-subsampled-48-qwen" or script_args.dataset_name == "yali30/findingdory-train-subsampled-48-qwen":
         prepared_dataset = [prepare_custom_dataset(example) for example in dataset]
     else:   
         prepared_dataset = [prepare_dataset(example, script_args.video_cache_dir) for example in dataset]

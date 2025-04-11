@@ -17,11 +17,10 @@
 Example usage:
 python evaluate_video_llm.py \
     --checkpoint_dir=video-llm-output \
-    --dataset_name=mfarre/simplevideoshorts \
-    --video_cache_dir="/optional/path/to/cache/" \
-    --model_name_or_path=Qwen/Qwen2-VL-7B-Instruct \
+    --dataset_name=yali30/findingdory-val-subsampled-48-qwen \
+    --model_name_or_path=Qwen/Qwen2.5-VL-3B-Instruct \
     --per_device_eval_batch_size=1 \
-    --bf16=True \
+    --bf16 \
     --torch_dtype=bfloat16 \
     --max_samples=10 \
     --output_file=evaluation_results.json
@@ -218,20 +217,21 @@ def main():
     print(f"Loading dataset {args.dataset_name}...")
     dataset = load_dataset(args.dataset_name, name=args.dataset_config, split="train")
     
-    # Apply offset and limit
+    # Calculate total examples and indices to sample
     total_examples = len(dataset)
-    start_idx = min(200, total_examples - 1)
-    
     if args.max_samples != -1:
-        end_idx = min(start_idx + args.max_samples, total_examples)
-        dataset = dataset.select(range(start_idx, end_idx))
-        print(f"Using {len(dataset)} samples for evaluation (from index {start_idx} to {end_idx-1}).")
+        # Calculate step size to spread samples across dataset
+        step = max(1, total_examples // args.max_samples)
+        # Generate indices spread throughout the dataset
+        indices = list(range(0, total_examples, step))[:args.max_samples]
+        dataset = dataset.select(indices)
+        print(f"Using {len(dataset)} samples spread throughout the dataset (step size: {step})")
     else:
         print(f"Using all {len(dataset)} samples for evaluation.")
     
     # Prepare dataset
     print("Preparing dataset for evaluation...")
-    if args.dataset_name == "yali30/findingdory-val-subsampled-48-qwen":
+    if "findingdory" in args.dataset_name:
         prepared_examples = [prepare_custom_dataset(example) for example in dataset]
     else:
         prepared_examples = [prepare_dataset(example, args.video_cache_dir) for example in dataset]

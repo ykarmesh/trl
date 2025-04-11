@@ -148,6 +148,7 @@ def collate_fn(examples: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
     """Collate batch of examples for training."""
     texts = []
     video_inputs = []
+    input_texts = []
 
     for i, example in enumerate(examples):
         try:
@@ -157,18 +158,29 @@ def collate_fn(examples: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
                 for content in message["content"]
                 if content.get("type") == "video"
             )
-            # print(f"Processing video: {os.path.basename(video_path)}")
 
             texts.append(processor.apply_chat_template(example["messages"], tokenize=False))
+            breakpoint()
+            input_texts.append("<|im_start|>".join(texts[-1].split("<|im_start|>")[:-1]))
             video_input = process_vision_info(example["messages"])[1][0]
             video_inputs.append(video_input)
         except Exception as e:
             raise ValueError(f"Failed to process example {i}: {e}") from e
 
     inputs = processor(text=texts, videos=video_inputs, return_tensors="pt", padding=True)
+    inputs_only_tokens = processor(text=input_texts, videos=video_inputs, return_tensors="pt", padding=True)
 
     labels = inputs["input_ids"].clone()
+    
+    # Mask out padding tokens
     labels[labels == processor.tokenizer.pad_token_id] = -100
+    
+    # Create a mask for input tokens using batched operations
+    input_mask = inputs_only_tokens["input_ids"] != processor.tokenizer.pad_token_id
+    input_lengths = input_mask.sum(dim=1)
+    batch_size, seq_length = labels.shape
+    mask_indices = torch.arange(seq_length).unsqueeze(0).expand(batch_size, -1).to(labels.device)
+    labels = torch.where(mask_indices < input_lengths.unsqueeze(1), -100, labels)
     
     # Handle visual tokens based on processor type
     visual_tokens = (
@@ -180,6 +192,7 @@ def collate_fn(examples: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
         ]
     )
     
+    # Mask out visual tokens
     for visual_token_id in visual_tokens:
         labels[labels == visual_token_id] = -100
 

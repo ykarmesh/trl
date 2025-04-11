@@ -17,11 +17,10 @@
 Example usage:
 python evaluate_video_llm.py \
     --checkpoint_dir=video-llm-output \
-    --dataset_name=mfarre/simplevideoshorts \
-    --video_cache_dir="/optional/path/to/cache/" \
-    --model_name_or_path=Qwen/Qwen2-VL-7B-Instruct \
+    --dataset_name=yali30/findingdory-val-subsampled-48-qwen \
+    --model_name_or_path=Qwen/Qwen2.5-VL-3B-Instruct \
     --per_device_eval_batch_size=1 \
-    --bf16=True \
+    --bf16 \
     --torch_dtype=bfloat16 \
     --max_samples=10 \
     --output_file=evaluation_results.json
@@ -232,7 +231,7 @@ def main():
     
     # Prepare dataset
     print("Preparing dataset for evaluation...")
-    if args.dataset_name == "yali30/findingdory-val-subsampled-48-qwen":
+    if "findingdory" in args.dataset_name:
         prepared_examples = [prepare_custom_dataset(example) for example in dataset]
     else:
         prepared_examples = [prepare_dataset(example, args.video_cache_dir) for example in dataset]

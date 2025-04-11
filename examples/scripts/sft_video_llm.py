@@ -51,6 +51,7 @@ from typing import Any
 import requests
 import torch
 import wandb
+from collections import defaultdict
 from datasets import load_dataset
 from peft import LoraConfig
 from qwen_vl_utils import process_vision_info
@@ -96,7 +97,7 @@ def prepare_custom_dataset(example: dict[str, Any]) -> dict[str, list[dict[str, 
     qa_pairs = json.loads(example["qa"])
 
     system_message = "You are an expert and intelligent question answering agent. You will be shown a video that was collected by a robot yesterday while navigating around a house and picking and placing objects. Each frame in the video has a unique frame index in the top left corner of the video along with the time of day information. Your job is to help the robot complete a task today by looking at the video and finding the frame indices that the robot should move to. Note: The robot uses a magic grasp action to pick up an object, where a gripper goes close to the object and the object gets magically picked up. When deciding which frame indices to choose, make sure you choose the frame indices that are closest to the object/place."
-    
+
     qa_pair = qa_pairs[0]
 
     messages = [
@@ -148,27 +149,36 @@ def collate_fn(examples: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
     """Collate batch of examples for training."""
     texts = []
     video_inputs = []
+    input_texts = []
 
     for i, example in enumerate(examples):
-        try:
-            video_path = next(
-                content["video"]
-                for message in example["messages"]
-                for content in message["content"]
-                if content.get("type") == "video"
-            )
-            # print(f"Processing video: {os.path.basename(video_path)}")
+        video_path = next(
+            content["video"]
+            for message in example["messages"]
+            for content in message["content"]
+            if content.get("type") == "video"
+        )
 
-            texts.append(processor.apply_chat_template(example["messages"], tokenize=False))
-            video_input = process_vision_info(example["messages"])[1][0]
-            video_inputs.append(video_input)
-        except Exception as e:
-            raise ValueError(f"Failed to process example {i}: {e}") from e
+        texts.append(processor.apply_chat_template(example["messages"], tokenize=False))
+        input_texts.append("<|im_start|>".join(texts[-1].split("<|im_start|>")[:-1]))
+        video_input = process_vision_info(example["messages"])[1][0]
+        video_inputs.append(video_input)
+
 
     inputs = processor(text=texts, videos=video_inputs, return_tensors="pt", padding=True)
+    inputs_only_tokens = processor(text=input_texts, videos=video_inputs, return_tensors="pt", padding=True)
 
     labels = inputs["input_ids"].clone()
+    
+    # Mask out padding tokens
     labels[labels == processor.tokenizer.pad_token_id] = -100
+    
+    # Create a mask for input tokens using batched operations
+    input_mask = inputs_only_tokens["input_ids"] != processor.tokenizer.pad_token_id
+    input_lengths = input_mask.sum(dim=1)
+    batch_size, seq_length = labels.shape
+    mask_indices = torch.arange(seq_length).unsqueeze(0).expand(batch_size, -1).to(labels.device)
+    labels = torch.where(mask_indices < input_lengths.unsqueeze(1), -100, labels)
     
     # Handle visual tokens based on processor type
     visual_tokens = (
@@ -180,11 +190,58 @@ def collate_fn(examples: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
         ]
     )
     
+    # Mask out visual tokens
     for visual_token_id in visual_tokens:
         labels[labels == visual_token_id] = -100
 
     inputs["labels"] = labels
+
     return inputs
+
+def preprocess_logits_for_metrics(logits, labels):
+    """
+    Store only the argmax of the logits to save memory.
+    """
+    if type(logits) == tuple:
+        logits = logits[0]
+    pred_ids = torch.argmax(logits, dim=-1)
+    return pred_ids
+
+
+def get_compute_metrics(processor):
+    def extract_assistant_response(text):
+        """Extract only the assistant's response from the full model output."""
+        if "assistant\n" in text:
+            return text.split("assistant\n", 1)[1].strip()
+        return text  # Return original text if pattern not found
+
+    def compute_metrics(pred):
+        """
+        Compute metrics for the model.
+        """
+        predictions = torch.tensor(pred.predictions)
+        labels = torch.tensor(pred.label_ids)
+        correct, total = 0, 0
+        for i in range(len(predictions)):
+            label_i, pred_i = labels[i], predictions[i]
+            pred_i = pred_i[label_i != -100]
+            label_i = label_i[label_i != -100]
+        
+            # Convert to text
+            pred_text = processor.tokenizer.decode(pred_i, skip_special_tokens=True).strip()
+            label_text = processor.tokenizer.decode(label_i, skip_special_tokens=True).strip()
+
+            pred_text = extract_assistant_response(pred_text)
+            label_text = extract_assistant_response(label_text)
+
+            if pred_text == label_text:
+                correct += 1
+            total += 1
+
+        print(pred_text.encode("utf-8"))
+        print(label_text.encode("utf-8"))
+        return {"accuracy": correct / total}
+    return compute_metrics
 
 
 @dataclass
@@ -213,6 +270,7 @@ if __name__ == "__main__":
 
     # Load dataset
     dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config, split="train")
+    eval_dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config, split="validation")
 
     # Setup model
     torch_dtype = (
@@ -224,8 +282,8 @@ if __name__ == "__main__":
         revision=model_args.model_revision,
         trust_remote_code=model_args.trust_remote_code,
         torch_dtype=torch_dtype,
-        device_map=get_kbit_device_map(),
-        quantization_config=get_quantization_config(model_args),
+        # device_map=get_kbit_device_map(),
+        # quantization_config=get_quantization_config(model_args),
         attn_implementation=model_args.attn_implementation,
         use_cache=False,
     )
@@ -239,9 +297,8 @@ if __name__ == "__main__":
         model.enable_input_require_grads()
 
     processor = AutoProcessor.from_pretrained(
-        model_args.model_name_or_path, trust_remote_code=model_args.trust_remote_code
+        model_args.model_name_or_path, trust_remote_code=model_args.trust_remote_code, use_fast=True
     )
-
     # Prepare dataset
     if script_args.max_samples != -1:
         dataset = dataset.select(range(script_args.max_samples))
@@ -249,10 +306,14 @@ if __name__ == "__main__":
     else:
         print(f"Using all {len(dataset)} samples for training.")
 
-    if script_args.dataset_name == "yali30/findingdory-val-subsampled-48-qwen" or script_args.dataset_name == "yali30/findingdory-train-subsampled-48-qwen":
+    eval_dataset = eval_dataset.select(range(512))
+
+    if "findingdory" in script_args.dataset_name:
         prepared_dataset = [prepare_custom_dataset(example) for example in dataset]
+        prepared_eval_dataset = [prepare_custom_dataset(example) for example in eval_dataset]
     else:   
         prepared_dataset = [prepare_dataset(example, script_args.video_cache_dir) for example in dataset]
+        prepared_eval_dataset = [prepare_dataset(example, script_args.video_cache_dir) for example in eval_dataset]
     
     # Initialize wandb if specified
     if training_args.report_to == "wandb":
@@ -263,10 +324,12 @@ if __name__ == "__main__":
         model=model,
         args=training_args,
         train_dataset=prepared_dataset,
+        eval_dataset=prepared_eval_dataset,
         data_collator=collate_fn,
         peft_config=get_peft_config(model_args),
-        # tokenizer=processor.tokenizer,
         processing_class=processor.tokenizer,
+        preprocess_logits_for_metrics=preprocess_logits_for_metrics,
+        compute_metrics=get_compute_metrics(processor)
     )
 
     # Train model

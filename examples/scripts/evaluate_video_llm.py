@@ -217,14 +217,15 @@ def main():
     print(f"Loading dataset {args.dataset_name}...")
     dataset = load_dataset(args.dataset_name, name=args.dataset_config, split="train")
     
-    # Apply offset and limit
+    # Calculate total examples and indices to sample
     total_examples = len(dataset)
-    start_idx = min(200, total_examples - 1)
-    
     if args.max_samples != -1:
-        end_idx = min(start_idx + args.max_samples, total_examples)
-        dataset = dataset.select(range(start_idx, end_idx))
-        print(f"Using {len(dataset)} samples for evaluation (from index {start_idx} to {end_idx-1}).")
+        # Calculate step size to spread samples across dataset
+        step = max(1, total_examples // args.max_samples)
+        # Generate indices spread throughout the dataset
+        indices = list(range(0, total_examples, step))[:args.max_samples]
+        dataset = dataset.select(indices)
+        print(f"Using {len(dataset)} samples spread throughout the dataset (step size: {step})")
     else:
         print(f"Using all {len(dataset)} samples for evaluation.")
     

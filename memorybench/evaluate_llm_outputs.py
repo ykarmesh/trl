@@ -48,9 +48,15 @@ def parse_list_string(list_string: str) -> List[List[int]]:
 
 def calculate_relaxed_match(pred_lists: List[List[int]], gt_lists: List[List[int]]) -> float:
     """
-    Calculate relaxed matching score.
-    Returns 1.0 if any element in each predicted sublist appears in corresponding ground truth sublist.
-    Returns 0.0 if number of sublists don't match or no elements match.
+    Calculate relaxed matching score as a product of precision scores for each sublist.
+    
+    For each predicted sublist and corresponding ground truth sublist:
+    - Calculates precision as (number of predicted elements in ground truth) / (number of predicted elements)
+    - Returns product of precision scores across all sublists
+    
+    Returns:
+    - 0.0 if number of sublists don't match
+    - Product of precision scores (between 0.0 and 1.0) otherwise
     """
     # Check if number of sublists match
     if len(pred_lists) != len(gt_lists):
@@ -60,8 +66,11 @@ def calculate_relaxed_match(pred_lists: List[List[int]], gt_lists: List[List[int
     precision_all_goals = []
     for pred_sublist, gt_sublist in zip(pred_lists, gt_lists):
         # If none of the predicted elements appear in ground truth sublist, return 0
-        precision = sum(pred_elem in gt_sublist for pred_elem in pred_sublist) / len(pred_sublist)
-        precision_all_goals.append(precision)
+        if len(pred_sublist) == 0:
+            precision = 0.0
+        else:
+            precision = sum(pred_elem in gt_sublist for pred_elem in pred_sublist) / len(pred_sublist)
+            precision_all_goals.append(precision)
 
     # multiply precision of all goals
     return np.prod(precision_all_goals)
@@ -73,8 +82,8 @@ def evaluate_results(results_file: str) -> Dict:
     
     total_examples = len(data["individual_results"])
     exact_matches = 0
-    relaxed_matches = 0
-    parsing_errors = 0  # Track number of parsing errors
+    relaxed_scores = []  # Changed from counter to list of scores
+    parsing_errors = 0
     
     for result in data["individual_results"]:
         try:
@@ -95,26 +104,25 @@ def evaluate_results(results_file: str) -> Dict:
                 parsing_errors += 1
                 continue
                 
-            if calculate_relaxed_match(pred_lists, gt_lists):
-                relaxed_matches += 1
+            # Store the actual precision score
+            relaxed_score = calculate_relaxed_match(pred_lists, gt_lists)
+            relaxed_scores.append(relaxed_score)
                 
         except Exception as e:
-            # Any error in processing counts as a failure
             parsing_errors += 1
             print(f"Error processing example: {e}")
             continue
     
     # Calculate accuracies
     exact_accuracy = exact_matches / total_examples if total_examples > 0 else 0
-    relaxed_accuracy = relaxed_matches / total_examples if total_examples > 0 else 0
+    avg_relaxed_score = np.mean(relaxed_scores) if relaxed_scores else 0
     
     return {
         "total_examples": total_examples,
         "exact_matches": exact_matches,
-        "relaxed_matches": relaxed_matches,
+        "avg_relaxed_score": avg_relaxed_score,
         "parsing_errors": parsing_errors,
-        "exact_accuracy": exact_accuracy,
-        "relaxed_accuracy": relaxed_accuracy
+        "exact_accuracy": exact_accuracy
     }
 
 def evaluate_directory(input_dir: str, output_file: str):
@@ -142,17 +150,16 @@ def evaluate_directory(input_dir: str, output_file: str):
         print(f"Results for {json_file.name}:")
         print(f"Total examples: {metrics['total_examples']}")
         print(f"Exact matches: {metrics['exact_matches']}")
-        print(f"Relaxed matches: {metrics['relaxed_matches']}")
+        print(f"Average relaxed score: {metrics['avg_relaxed_score']:.4f}")
         print(f"Parsing errors: {metrics['parsing_errors']}")
         print(f"Exact accuracy: {metrics['exact_accuracy']:.4f}")
-        print(f"Relaxed accuracy: {metrics['relaxed_accuracy']:.4f}")
     
     # Calculate average metrics across all files
     num_files = len(all_results)
     if num_files > 0:
         avg_metrics = {
             "average_exact_accuracy": sum(r["exact_accuracy"] for r in all_results) / num_files,
-            "average_relaxed_accuracy": sum(r["relaxed_accuracy"] for r in all_results) / num_files,
+            "average_relaxed_score": sum(r["avg_relaxed_score"] for r in all_results) / num_files,
             "average_parsing_error_rate": sum(r["parsing_errors"] / r["total_examples"] for r in all_results) / num_files,
             "total_files_evaluated": num_files,
             "total_examples_across_files": sum(r["total_examples"] for r in all_results),
@@ -161,7 +168,7 @@ def evaluate_directory(input_dir: str, output_file: str):
     else:
         avg_metrics = {
             "average_exact_accuracy": 0.0,
-            "average_relaxed_accuracy": 0.0,
+            "average_relaxed_score": 0.0,
             "average_parsing_error_rate": 0.0,
             "total_files_evaluated": 0,
             "total_examples_across_files": 0,
@@ -183,13 +190,13 @@ def evaluate_directory(input_dir: str, output_file: str):
     print(f"Total examples across all files: {avg_metrics['total_examples_across_files']}")
     print(f"Total parsing errors: {avg_metrics['total_parsing_errors']}")
     print(f"Average exact accuracy: {avg_metrics['average_exact_accuracy']:.4f}")
-    print(f"Average relaxed accuracy: {avg_metrics['average_relaxed_accuracy']:.4f}")
+    print(f"Average relaxed score: {avg_metrics['average_relaxed_score']:.4f}")
     print(f"Average parsing error rate: {avg_metrics['average_parsing_error_rate']:.4f}")
     print(f"\nDetailed results saved to: {output_file}")
 
 def main():
     input_dir = "/srv/flash1/yali30/code/trl/runs/karmesh_runs"
-    output_file = "/srv/flash1/yali30/code/trl/memorybench/combined_evaluation_result_karmesh.json"
+    output_file = "/srv/flash1/yali30/code/trl/memorybench/combined_eval_results/combined_evaluation_result_karmesh.json"
     evaluate_directory(input_dir, output_file)
 
 if __name__ == "__main__":

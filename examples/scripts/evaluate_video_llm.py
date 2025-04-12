@@ -186,6 +186,7 @@ def main():
         torch_dtype=torch_dtype,
         device_map=get_kbit_device_map(),
         use_cache=True,
+        attn_implementation="flash_attention_2",
     )
     
     model = AutoModelForVision2Seq.from_pretrained(args.model_name_or_path, **model_kwargs)

@@ -1,7 +1,46 @@
 #!/bin/bash
-#SBATCH --job-name=mmbench_sample
-#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/eval_string_match/eval_string_match-%j.out
-#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/eval_string_match/eval_string_match-%j.err
+
+ROOT_DIR="/srv/flash1/yali30/code/trl/runs/apr_11"
+OUTPUT_BASE_DIR="/srv/flash1/yali30/code/trl/runs/eval_string_match_apr_11"
+
+# Create output directory if it doesn't exist
+mkdir -p $OUTPUT_BASE_DIR
+
+# Loop through each model directory
+for MODEL_DIR in $ROOT_DIR/*/; do
+    # Get model name from directory path
+    MODEL_NAME=$(basename $MODEL_DIR)
+    
+    # Skip if it's the eval_string_match directory itself
+    if [[ $MODEL_NAME == "eval_string_match" ]]; then
+        continue
+    fi
+    
+    # Check for checkpoint directories
+    CHECKPOINT_DIRS=($MODEL_DIR/checkpoint-*)
+    
+    # Skip if no checkpoints found
+    if [ ! -d "${CHECKPOINT_DIRS[0]}" ]; then
+        echo "No checkpoints found in $MODEL_DIR, skipping..."
+        continue
+    fi
+    
+    # Process each checkpoint
+    for CKPT_DIR in "${CHECKPOINT_DIRS[@]}"; do
+        # Extract checkpoint ID
+        CKPT_ID=$(basename $CKPT_DIR)
+        
+        # Create output filename
+        OUTPUT_FILE="$OUTPUT_BASE_DIR/${MODEL_NAME}_${CKPT_ID}.json"
+        
+        echo "Processing $MODEL_NAME $CKPT_ID..."
+        
+        # Submit evaluation job
+        sbatch <<EOT
+#!/bin/bash
+#SBATCH --job-name=eval_${MODEL_NAME}_${CKPT_ID}
+#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/eval_string_match_apr_11/${MODEL_NAME}_${CKPT_ID}-%j.out
+#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/eval_string_match_apr_11/${MODEL_NAME}_${CKPT_ID}-%j.err
 #SBATCH --gpus=a40:1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=12
@@ -11,16 +50,6 @@
 #SBATCH --partition=kira-lab,overcap
 #SBATCH --requeue
 #SBATCH --signal=USR1@100
-
-MAIN_ADDR=$(scontrol show hostnames "\${SLURM_JOB_NODELIST}" | head -n 1)
-export MAIN_ADDR
-
-# Define variables at the top, before SBATCH directives
-CKPT_NAME=qwen-videos-sft-48-train-full-ft-lr8e5-epoch5-3B
-CKPT_DIR=/srv/flash1/yali30/code/trl/runs/qwen-videos-sft-48-train-full-ft-lr8e5-epoch5-3B/checkpoint-850
-
-# Extract checkpoint ID from CKPT_DIR
-CKPT_ID=$(basename $CKPT_DIR)  # This will extract 'checkpoint-50'
 
 export TRANSFORMERS_CACHE=/coc/testnvme/yali30/code/trl/models
 export HF_DATASETS_CACHE=/coc/testnvme/yali30/code/trl/hf_datasets
@@ -39,4 +68,12 @@ srun -u python examples/scripts/evaluate_video_llm.py \
     --bf16 \
     --torch_dtype bfloat16 \
     --max_samples 500 \
-    --output_file runs/eval_string_match/${CKPT_NAME}_${CKPT_ID}.json
+    --output_file $OUTPUT_FILE
+EOT
+        
+        # Wait a bit between submissions to avoid overwhelming the scheduler
+        sleep 2
+    done
+done
+
+echo "All evaluation jobs submitted!"

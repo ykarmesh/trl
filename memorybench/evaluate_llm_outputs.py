@@ -3,6 +3,7 @@ import ast
 import os
 from pathlib import Path
 from typing import List, Dict
+import numpy as np
 
 def parse_list_string(list_string: str) -> List[List[int]]:
     """
@@ -56,13 +57,14 @@ def calculate_relaxed_match(pred_lists: List[List[int]], gt_lists: List[List[int
         return 0.0
     
     # Check each corresponding sublist pair
+    precision_all_goals = []
     for pred_sublist, gt_sublist in zip(pred_lists, gt_lists):
         # If none of the predicted elements appear in ground truth sublist, return 0
-        if not any(pred_elem in gt_sublist for pred_elem in pred_sublist):
-            return 0.0
-    
-    # All sublists had at least one matching element
-    return 1.0
+        precision = sum(pred_elem in gt_sublist for pred_elem in pred_sublist) / len(pred_sublist)
+        precision_all_goals.append(precision)
+
+    # multiply precision of all goals
+    return np.prod(precision_all_goals)
 
 def evaluate_results(results_file: str) -> Dict:
     """Evaluate both exact and relaxed matching metrics from results file."""
@@ -186,8 +188,8 @@ def evaluate_directory(input_dir: str, output_file: str):
     print(f"\nDetailed results saved to: {output_file}")
 
 def main():
-    input_dir = "/srv/flash1/yali30/code/trl/runs/eval_string_match"
-    output_file = "/srv/flash1/yali30/code/trl/runs/eval_string_match/combined_evaluation_results.json"
+    input_dir = "/srv/flash1/yali30/code/trl/runs/karmesh_runs"
+    output_file = "/srv/flash1/yali30/code/trl/memorybench/combined_evaluation_result_karmesh.json"
     evaluate_directory(input_dir, output_file)
 
 if __name__ == "__main__":

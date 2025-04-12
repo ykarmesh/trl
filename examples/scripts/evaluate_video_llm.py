@@ -28,10 +28,12 @@ python evaluate_video_llm.py \
 
 import argparse
 import json
+import numpy as np
 import os
 import random
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, List
+import ast
 
 import requests
 import torch
@@ -44,26 +46,6 @@ from transformers import AutoModelForVision2Seq, AutoProcessor
 from trl import get_kbit_device_map
 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
-
-def download_video(url: str, cache_dir: str) -> str:
-    """Download video if not already present locally."""
-    os.makedirs(cache_dir, exist_ok=True)  # Create cache dir if it doesn't exist
-    filename = url.split("/")[-1]
-    local_path = os.path.join(cache_dir, filename)
-
-    if os.path.exists(local_path):
-        return local_path
-
-    try:
-        with requests.get(url, stream=True) as r:
-            r.raise_for_status()
-            with open(local_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-        return local_path
-    except requests.RequestException as e:
-        raise Exception(f"Failed to download video: {e}") from e
 
 
 def prepare_custom_dataset(example: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -92,54 +74,70 @@ def prepare_custom_dataset(example: dict[str, Any]) -> dict[str, list[dict[str, 
     }
 
 
-def prepare_dataset(example: dict[str, Any], cache_dir: str) -> dict[str, list[dict[str, Any]]]:
-    """Prepare dataset example for evaluation."""
-    video_url = example["video_url"]
-    timecoded_cc = example["timecoded_cc"]
-    qa_pairs = json.loads(example["qa"])
+def parse_list_string(list_string: str) -> List[List[int]]:
+    """
+    Convert string representation of list of lists to actual nested list.
+    Also handles cases where the list is embedded in a conversation.
+    """
+    try:
+        # First try direct parsing
+        return ast.literal_eval(list_string)
+    except:
+        try:
+            # If direct parsing fails, try to extract the last list-like pattern
+            # Look for the last occurrence of square brackets
+            last_open_bracket = list_string.rfind('[')
+            last_close_bracket = list_string.rfind(']')
 
-    system_message = "You are an expert in movie narrative analysis."
-    base_prompt = f"""Analyze the video and consider the following timecoded subtitles:
+            if last_open_bracket != -1 and last_close_bracket != -1:
+                # Extract the substring that looks like a list
+                potential_list = list_string[last_open_bracket:last_close_bracket + 1]
 
-{timecoded_cc}
+                # Try to parse the extracted list
+                parsed_list = ast.literal_eval(potential_list)
 
-Based on this information, please answer the following questions:"""
+                # Check if we need to wrap it in another list
+                if isinstance(parsed_list, list):
+                    # If the first element is an integer, wrap the whole list
+                    if parsed_list and isinstance(parsed_list[0], int):
+                        return [parsed_list]
+                    # If the first element is a list, return as is
+                    elif parsed_list and isinstance(parsed_list[0], list):
+                        return parsed_list
 
-    selected_qa = random.sample(qa_pairs, 1)[0]
+                # If we can't determine the structure, return empty list
+                print(f"Unexpected list structure in: {potential_list}")
+                return []
 
-    messages = [
-        {"role": "system", "content": [{"type": "text", "text": system_message}]},
-        {
-            "role": "user",
-            "content": [
-                {"type": "video", "video": download_video(video_url, cache_dir), "max_pixels": 360 * 420, "fps": 1.0},
-                {"type": "text", "text": f"{base_prompt}\n\nQuestion: {selected_qa['question']}"},
-            ],
-        },
-    ]
-
-    return {
-        "messages": messages,
-        "ground_truth": selected_qa["answer"]
-    }
+            print(f"Failed to find list pattern in string: {list_string}")
+            return []
+        except:
+            print(f"Failed to parse list string: {list_string}")
+            return []
 
 
-@dataclass
-class EvaluationArguments:
-    """Arguments for the evaluation script."""
+def calculate_relaxed_match(pred_lists: List[List[int]], gt_lists: List[List[int]]) -> float:
+    """
+    Calculate relaxed matching score.
+    Returns 1.0 if any element in each predicted sublist appears in corresponding ground truth sublist.
+    Returns 0.0 if number of sublists don't match or no elements match.
+    """
+    # Check if number of sublists match
+    if len(pred_lists) != len(gt_lists):
+        return 0.0
     
-    checkpoint_dir: str = field(metadata={"help": "Path to the trained model checkpoint."})
-    model_name_or_path: str = field(metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models."})
-    dataset_name: str = field(metadata={"help": "The name of the dataset to use."})
-    dataset_config: Optional[str] = field(default=None, metadata={"help": "The configuration name of the dataset to use."})
-    video_cache_dir: str = field(default="/tmp/videos/", metadata={"help": "Video cache directory."})
-    max_samples: int = field(default=-1, metadata={"help": "Maximum number of samples to use for evaluation."})
-    per_device_eval_batch_size: int = field(default=1, metadata={"help": "Batch size per device during evaluation."})
-    bf16: bool = field(default=False, metadata={"help": "Whether to use bf16 16-bit (mixed) precision."})
-    torch_dtype: Optional[str] = field(default=None, metadata={"help": "Override the default `torch.dtype` and load the model with specified dtype."})
-    trust_remote_code: bool = field(default=False, metadata={"help": "Whether to trust remote code."})
-    output_file: str = field(default="evaluation_results.json", metadata={"help": "Path to save evaluation results."})
+    # Check each corresponding sublist pair
+    precision_all_goals = []
+    for pred_sublist, gt_sublist in zip(pred_lists, gt_lists):
+        # If none of the predicted elements appear in ground truth sublist, return 0
+        if len(pred_sublist) == 0:
+            precision = 0.0
+        else:
+            precision = sum(pred_elem in gt_sublist for pred_elem in pred_sublist) / len(pred_sublist)
+            precision_all_goals.append(precision)
 
+    # multiply precision of all goals
+    return np.prod(precision_all_goals)
 
 # Simple exact match metric
 def calculate_exact_match(pred_text, ground_truth):
@@ -151,7 +149,7 @@ def extract_assistant_response(text):
     """Extract only the assistant's response from the full model output."""
     if "assistant\n" in text:
         return text.split("assistant\n", 1)[1].strip()
-    return text  # Return original text if pattern not found
+    return None  # Return original text if pattern not found
 
 
 def main():
@@ -168,7 +166,7 @@ def main():
     parser.add_argument("--trust_remote_code", action="store_true", help="Trust remote code")
     parser.add_argument("--torch_dtype", type=str, default=None, help="Override torch dtype")
     parser.add_argument("--output_file", type=str, default="evaluation_results.json", help="Output file for results")
-    
+    parser.add_argument("--attn_implementation", type=str, default=None, help="Attention implementation")
     args = parser.parse_args()
     
     # Set up device and dtype
@@ -185,25 +183,22 @@ def main():
         trust_remote_code=args.trust_remote_code,
         torch_dtype=torch_dtype,
         device_map=get_kbit_device_map(),
+        attn_implementation=args.attn_implementation,
         use_cache=True,
     )
     
-    model = AutoModelForVision2Seq.from_pretrained(args.model_name_or_path, **model_kwargs)
-    
     # Load trained checkpoint
     print(f"Loading checkpoint from {args.checkpoint_dir}...")
-    try:
-        # Check if this is a PEFT model
-        if os.path.exists(os.path.join(args.checkpoint_dir, "adapter_config.json")):
-            print("Loading as PEFT model...")
-            model = PeftModel.from_pretrained(model, args.checkpoint_dir)
-            model = model.merge_and_unload()  # Merge adapter weights for better inference performance
-        else:
-            # Load as full model
-            model = AutoModelForVision2Seq.from_pretrained(args.checkpoint_dir, **model_kwargs)
-    except Exception as e:
-        print(f"Error loading checkpoint: {e}")
-        print("Falling back to base model...")
+
+    # Check if this is a PEFT model
+    if os.path.exists(os.path.join(args.checkpoint_dir, "adapter_config.json")):
+        print("Loading as PEFT model...")
+        model = AutoModelForVision2Seq.from_pretrained(args.model_name_or_path, **model_kwargs)
+        model = PeftModel.from_pretrained(model, args.checkpoint_dir)
+        model = model.merge_and_unload()  # Merge adapter weights for better inference performance
+    else:
+        # Load as full model
+        model = AutoModelForVision2Seq.from_pretrained(args.checkpoint_dir, **model_kwargs)
     
     # Put model in evaluation mode
     model.eval()
@@ -235,92 +230,100 @@ def main():
         prepared_examples = [prepare_custom_dataset(example) for example in dataset]
     else:
         prepared_examples = [prepare_dataset(example, args.video_cache_dir) for example in dataset]
-    
+
     # Evaluation loop
     print("Starting evaluation...")
-    results = []
-    exact_match_scores = []
+    results, exact_match_scores, relaxed_match_scores = [], [], []
     
     for i, example in enumerate(tqdm.tqdm(prepared_examples)):
-        try:
-            # Process the input
-            messages = example["messages"]
-            print("Sample: ", example)
-            ground_truth = example["ground_truth"]
+        # Process the input
+        messages = example["messages"]
+        print("Sample: ", example)
+        ground_truth = example["ground_truth"]
+
+        # Get video path from messages
+        video_path = next(
+            content["video"]
+            for message in messages
+            for content in message["content"]
+            if content.get("type") == "video"
+        )
+
+        # Convert to model inputs
+        with torch.no_grad():
+            inputs = processor(
+                text=processor.apply_chat_template(messages, tokenize=False),
+                videos=process_vision_info(messages)[1][0],
+                return_tensors="pt",
+            ).to(device)
             
-            # Get video path from messages
-            video_path = next(
-                content["video"]
-                for message in messages
-                for content in message["content"]
-                if content.get("type") == "video"
+            # Generate output
+            output_ids = model.generate(
+                **inputs,
+                max_new_tokens=512,
+                do_sample=False,
+                temperature=1.0,
             )
-            
-            # Convert to model inputs
-            with torch.no_grad():
-                inputs = processor(
-                    text=processor.apply_chat_template(messages, tokenize=False),
-                    videos=process_vision_info(messages)[1][0],
-                    return_tensors="pt",
-                ).to(device)
-                
-                # Generate output
-                output_ids = model.generate(
-                    **inputs,
-                    max_new_tokens=512,
-                    do_sample=False,
-                    temperature=1.0,
-                )
-                
-                # Decode output
-                output_text = processor.tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
-                
-                # Extract only the assistant's response
-                output_text = extract_assistant_response(output_text)
-                
+
+            # Decode output
+            output_text = processor.tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
+
+            # Extract only the assistant's response
+            output_text = extract_assistant_response(output_text)
+
+            if output_text is None:
+                exact_match = 0.0
+                relaxed_match = 0.0
+            else:
                 # Calculate exact match score
                 exact_match = calculate_exact_match(output_text, ground_truth)
-                exact_match_scores.append(exact_match)
-                
-                # Store results
-                example_result = {
-                    "example_id": i,
-                    "video": os.path.basename(video_path),
-                    "ground_truth": ground_truth,
-                    "model_output": output_text,
-                    "exact_match": exact_match
-                }
-                results.append(example_result)
-                
-                # Print results
-                print(f"\nExample {i}:")
-                print(f"Video: {os.path.basename(video_path)}")
-                print(f"Ground Truth: {ground_truth}")
-                print(f"Model Output: {output_text}")
-                print(f"Exact Match: {exact_match:.1f}")
-                print("-" * 50)
-                
-        except Exception as e:
-            print(f"Error processing example {i}: {e}")
-            results.append({
+
+                # Calculate relaxed match score
+                pred_lists = parse_list_string(output_text)
+                gt_lists = parse_list_string(ground_truth)
+                relaxed_match = calculate_relaxed_match(pred_lists, gt_lists)
+
+            exact_match_scores.append(exact_match)
+            relaxed_match_scores.append(relaxed_match)
+
+            # Store results
+            example_result = {
                 "example_id": i,
-                "error": str(e)
-            })
-    
+                "video": os.path.basename(video_path),
+                "ground_truth": ground_truth,
+                "model_output": output_text,
+                "exact_match": exact_match,
+                "relaxed_match": relaxed_match
+            }
+            results.append(example_result)
+
+            # Print results
+            print(f"\nExample {i}:")
+            print(f"Video: {os.path.basename(video_path)}")
+            print(f"Ground Truth: {ground_truth}")
+            print(f"Model Output: {output_text}")
+            print(f"Exact Match: {exact_match:.2f}")
+            print(f"Relaxed Match: {relaxed_match:.2f}")
+            print("-" * 50)
+
     # Calculate and print average exact match score
     avg_exact_match = sum(exact_match_scores) / len(exact_match_scores) if exact_match_scores else 0.0
+    avg_relaxed_match = sum(relaxed_match_scores) / len(relaxed_match_scores) if relaxed_match_scores else 0.0
     
     print("\n" + "=" * 50)
     print(f"Overall Exact Match Score: {avg_exact_match:.4f}")
+    print(f"Overall Relaxed Match Score: {avg_relaxed_match:.4f}")
     print("=" * 50)
     
     # Save results
     final_results = {
         "individual_results": results,
-        "average_exact_match": avg_exact_match
+        "average_exact_match": avg_exact_match,
+        "average_relaxed_match": avg_relaxed_match
     }
     
     print(f"Saving results to {args.output_file}...")
+    os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
     with open(args.output_file, "w") as f:
         json.dump(final_results, f, indent=2)
     

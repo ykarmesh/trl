@@ -255,8 +255,8 @@ class CustomScriptArguments(ScriptArguments):
     """
 
     video_cache_dir: str = field(default="/tmp/videos/", metadata={"help": "Video cache directory."})
-    max_samples: int = field(default=-1, metadata={"help": "Maximum number of samples to use for training."})
-
+    train_samples: int = field(default=-1, metadata={"help": "Maximum number of samples to use for training."})
+    eval_samples: int = field(default=-1, metadata={"help": "Maximum number of samples to use for evaluation."})
 
 if __name__ == "__main__":
     # Parse arguments
@@ -299,16 +299,35 @@ if __name__ == "__main__":
     processor = AutoProcessor.from_pretrained(
         model_args.model_name_or_path, trust_remote_code=model_args.trust_remote_code, use_fast=True
     )
-    # Prepare dataset
-    if script_args.max_samples != -1:
-        dataset = dataset.select(range(script_args.max_samples))
-        print(f"Using {len(dataset)} samples for training.")
+    
+    # Prepare train dataset
+    total_examples = len(dataset)
+    if script_args.train_samples != -1:
+        # Calculate step size to spread samples across dataset
+        step = max(1, total_examples // script_args.train_samples)
+        # Generate indices spread throughout the datase t
+        indices = list(range(0, total_examples, step))[:script_args.train_samples]
+        dataset = dataset.select(indices)
+        print(f"Using {len(dataset)} samples spread throughout the dataset (step size: {step})")
     else:
         print(f"Using all {len(dataset)} samples for training.")
 
-    eval_dataset = eval_dataset.select(range(512))
+    # Filter eval dataset to specified eval_samples
+    total_examples = len(eval_dataset)
+    if script_args.eval_samples != -1:
+        # Calculate step size to spread samples across dataset
+        step = max(1, total_examples // script_args.eval_samples)
+        # Generate indices spread throughout the dataset
+        indices = list(range(0, total_examples, step))[:script_args.eval_samples]
+        eval_dataset = eval_dataset.select(indices)
+        print(f"Using {len(eval_dataset)} samples spread throughout the dataset (step size: {step})")
+    else:
+        print(f"Using all {len(eval_dataset)} samples for evaluation.")
 
     if "findingdory" in script_args.dataset_name:
+        # allowed_tasks = ["1"]
+        # dataset = dataset.filter(lambda x: x["id"].split('_')[-1] in allowed_tasks and x["id"].split('_')[1][0] == "5" and len(x["id"].split('_')[1]) == 3)
+        # eval_dataset = eval_dataset.filter(lambda x: x["id"].split('_')[-1] in allowed_tasks and x["id"].split('_')[1][0] == "5" and len(x["id"].split('_')[1]) == 3)
         prepared_dataset = [prepare_custom_dataset(example) for example in dataset]
         prepared_eval_dataset = [prepare_custom_dataset(example) for example in eval_dataset]
     else:   
@@ -333,8 +352,14 @@ if __name__ == "__main__":
     )
 
     # Train model
-    trainer.train()
-
+    trainer.train(
+        resume_from_checkpoint=training_args.resume_from_checkpoint
+    )
+    # eval_metrics = trainer.evaluate(
+    #     eval_dataset=prepared_eval_dataset
+    # )
+    # breakpoint()
+    
     # Save final model
     trainer.save_model(training_args.output_dir)
     if training_args.push_to_hub:

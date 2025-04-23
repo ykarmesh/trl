@@ -83,7 +83,6 @@ def evaluate_results(results_file: str) -> Dict:
     total_examples = len(data["individual_results"])
     exact_matches = 0
     relaxed_scores = []  # Changed from counter to list of scores
-    parsing_errors = 0
     
     for result in data["individual_results"]:
         try:
@@ -99,9 +98,9 @@ def evaluate_results(results_file: str) -> Dict:
             gt_lists = parse_list_string(gt_string)
             pred_lists = parse_list_string(pred_string)
             
-            # If either parsing returned empty list (parsing failure), count as failure
+            # If either parsing returned empty list (parsing failure), treat as 0 for relaxed metric
             if not gt_lists or not pred_lists:
-                parsing_errors += 1
+                relaxed_scores.append(0.0)
                 continue
                 
             # Store the actual precision score
@@ -109,7 +108,8 @@ def evaluate_results(results_file: str) -> Dict:
             relaxed_scores.append(relaxed_score)
                 
         except Exception as e:
-            parsing_errors += 1
+            # Treat exceptions as 0 for relaxed metric
+            relaxed_scores.append(0.0)
             print(f"Error processing example: {e}")
             continue
     
@@ -121,7 +121,6 @@ def evaluate_results(results_file: str) -> Dict:
         "total_examples": total_examples,
         "exact_matches": exact_matches,
         "avg_relaxed_score": avg_relaxed_score,
-        "parsing_errors": parsing_errors,
         "exact_accuracy": exact_accuracy
     }
 
@@ -151,8 +150,63 @@ def evaluate_directory(input_dir: str, output_file: str):
         print(f"Total examples: {metrics['total_examples']}")
         print(f"Exact matches: {metrics['exact_matches']}")
         print(f"Average relaxed score: {metrics['avg_relaxed_score']:.4f}")
-        print(f"Parsing errors: {metrics['parsing_errors']}")
         print(f"Exact accuracy: {metrics['exact_accuracy']:.4f}")
+    
+    # Plot the results
+    print("\nCreating accuracy comparison plot...")
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        # Extract data for plotting and clean up file names
+        results_with_names = []
+        for result in all_results:
+            name = result["file_name"]
+            if name.startswith("no_liger_epoch4_ckpt_2400"):
+                name = name.replace("no_liger_epoch4_ckpt_2400_", "")
+            
+            # Extract sample number from filename (assumes format like "500_sample_val.json")
+            sample_num = 0
+            try:
+                sample_num = int(name.split("_")[0])
+            except (ValueError, IndexError):
+                pass
+                
+            results_with_names.append((sample_num, name, result))
+        
+        # Sort results by sample number
+        results_with_names.sort()  # Sorts by first element (sample_num)
+        
+        # Extract the sorted data
+        file_names = [item[1] for item in results_with_names]
+        exact_accuracies = [item[2]["exact_accuracy"] for item in results_with_names]
+        relaxed_accuracies = [item[2]["avg_relaxed_score"] for item in results_with_names]
+        
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # Set width of bars
+        bar_width = 0.35
+        x = np.arange(len(file_names))
+        
+        # Create bars
+        ax.bar(x - bar_width/2, exact_accuracies, bar_width, label='Exact Accuracy')
+        ax.bar(x + bar_width/2, relaxed_accuracies, bar_width, label='Relaxed Accuracy')
+        
+        # Add labels, title and legend
+        ax.set_xlabel('Number of evaluation samples')
+        ax.set_ylabel('Accuracy')
+        ax.set_title('Comparison of Exact and Relaxed Accuracy by Number of Evaluation Samples')
+        ax.set_xticks(x)
+        ax.set_xticklabels(file_names, rotation=45, ha='right')
+        ax.legend()
+        
+        # Adjust layout and save
+        fig.tight_layout()
+        plt.savefig('/srv/flash1/yali30/code/trl/runs/eval_string_match_apr_21/accuracy_comparison.png')
+        print("Plot saved as 'accuracy_comparison.png'")
+    except ImportError:
+        print("Could not create plot: matplotlib is not installed")
     
     # Calculate average metrics across all files
     num_files = len(all_results)
@@ -160,19 +214,15 @@ def evaluate_directory(input_dir: str, output_file: str):
         avg_metrics = {
             "average_exact_accuracy": sum(r["exact_accuracy"] for r in all_results) / num_files,
             "average_relaxed_score": sum(r["avg_relaxed_score"] for r in all_results) / num_files,
-            "average_parsing_error_rate": sum(r["parsing_errors"] / r["total_examples"] for r in all_results) / num_files,
             "total_files_evaluated": num_files,
             "total_examples_across_files": sum(r["total_examples"] for r in all_results),
-            "total_parsing_errors": sum(r["parsing_errors"] for r in all_results)
         }
     else:
         avg_metrics = {
             "average_exact_accuracy": 0.0,
             "average_relaxed_score": 0.0,
-            "average_parsing_error_rate": 0.0,
             "total_files_evaluated": 0,
             "total_examples_across_files": 0,
-            "total_parsing_errors": 0
         }
     
     # Combine all results
@@ -188,15 +238,13 @@ def evaluate_directory(input_dir: str, output_file: str):
     print(f"\nFinal Results:")
     print(f"Total files evaluated: {avg_metrics['total_files_evaluated']}")
     print(f"Total examples across all files: {avg_metrics['total_examples_across_files']}")
-    print(f"Total parsing errors: {avg_metrics['total_parsing_errors']}")
     print(f"Average exact accuracy: {avg_metrics['average_exact_accuracy']:.4f}")
     print(f"Average relaxed score: {avg_metrics['average_relaxed_score']:.4f}")
-    print(f"Average parsing error rate: {avg_metrics['average_parsing_error_rate']:.4f}")
     print(f"\nDetailed results saved to: {output_file}")
 
 def main():
-    input_dir = "/srv/flash1/yali30/code/trl/runs/karmesh_runs"
-    output_file = "/srv/flash1/yali30/code/trl/memorybench/combined_eval_results/combined_evaluation_result_karmesh.json"
+    input_dir = "/srv/flash1/yali30/code/trl/runs/eval_string_match_apr_21"
+    output_file = "/srv/flash1/yali30/code/trl/runs/eval_string_match_apr_21/aggregated_results.json"
     evaluate_directory(input_dir, output_file)
 
 if __name__ == "__main__":

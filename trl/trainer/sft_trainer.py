@@ -40,8 +40,8 @@ from transformers import (
     is_wandb_available,
 )
 from transformers.data.data_collator import DataCollatorMixin
-from transformers.trainer_callback import TrainerCallback
-from transformers.trainer_utils import EvalPrediction
+from transformers.trainer_callback import TrainerCallback, ExportableState
+from transformers.trainer_utils import EvalPrediction, PREFIX_CHECKPOINT_DIR, SaveStrategy
 from transformers.utils import is_peft_available
 
 from ..data_utils import (
@@ -659,3 +659,92 @@ class SFTTrainer(Trainer):
         )
 
         model_card.save(os.path.join(self.args.output_dir, "README.md"))
+
+    def _save_checkpoint(self, model, trial):
+        '''
+        Modified from the original _save_checkpoint method in src/transformers/trainer.py
+        This function saves the full training state to a "checkpoint-latest" folder
+        and only saves the model weights to the step-specific checkpoint folders
+        '''
+
+        # Save model checkpoint
+        checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
+        latest_checkpoint_folder = "checkpoint-latest"
+
+        if self.hp_search_backend is None and trial is None:
+            self.store_flos()
+
+        run_dir = self._get_output_dir(trial=trial)
+        output_dir = os.path.join(run_dir, checkpoint_folder)
+        latest_output_dir = os.path.join(run_dir, latest_checkpoint_folder)
+        
+        # For step-specific checkpoint, only save the model weights
+        self.save_model(output_dir, _internal_call=True)
+
+        # Handle best model checkpoint tracking
+        if self.args.save_strategy in [SaveStrategy.STEPS, SaveStrategy.EPOCH] and self.state.best_global_step:
+            best_checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.best_global_step}"
+            best_checkpoint_dir = os.path.join(run_dir, best_checkpoint_folder)
+
+            if os.path.exists(best_checkpoint_dir):
+                self.state.best_model_checkpoint = best_checkpoint_dir
+
+        # Remove previous latest checkpoint folder if it exists
+        # In distributed training, only the main process should delete the folder
+        is_main_process = self.is_world_process_zero()
+        
+        if os.path.exists(latest_output_dir) and is_main_process:
+            import shutil
+            import time
+            import logging
+            
+            try:
+                print(f"Main process attempting to remove directory: {latest_output_dir}")
+                shutil.rmtree(latest_output_dir)
+                # Add a delay after removal to let the filesystem fully process the deletion
+                time.sleep(5.0)
+                print(f"Successfully removed directory: {latest_output_dir}")
+            except Exception as e:
+                import logging
+                logging.warning(f"Failed to remove previous latest checkpoint folder: {latest_output_dir} failed with error: {str(e)}")
+                print(f"Will proceed with creating new checkpoint directory")
+        
+        # Ensure all processes wait for the main process to complete the deletion
+        if hasattr(self, "accelerator") and hasattr(self.accelerator, "wait_for_everyone"):
+            self.accelerator.wait_for_everyone()
+
+        # Create the latest checkpoint folder and save everything there
+        os.makedirs(latest_output_dir, exist_ok=True)
+        
+        # Save model to the latest checkpoint folder
+        self.save_model(latest_output_dir, _internal_call=True)
+        
+        if not self.args.save_only_model:
+            # Save optimizer and scheduler to the latest checkpoint folder
+            self._save_optimizer_and_scheduler(latest_output_dir)
+            self._save_scaler(latest_output_dir)
+            # Save RNG state to the latest checkpoint folder
+            self._save_rng_state(latest_output_dir)
+
+        # Save the Trainer state to the latest checkpoint folder
+        TRAINER_STATE_NAME = "trainer_state.json"
+        if self.args.should_save:
+            # Update `ExportableState` callbacks and `TrainerControl` state to where we are currently
+            for cb in [
+                cb for cb in self.callback_handler.callbacks + [self.control] if isinstance(cb, ExportableState)
+            ]:
+                cb_name = cb.__class__.__name__
+                cb_state = cb.state()
+                if isinstance(self.state.stateful_callbacks[cb_name], list):
+                    self.state.stateful_callbacks[cb_name].append(cb_state)
+                else:
+                    self.state.stateful_callbacks[cb_name] = cb_state
+            self.state.save_to_json(os.path.join(latest_output_dir, TRAINER_STATE_NAME))
+
+        if self.args.push_to_hub:
+            self._push_from_checkpoint(output_dir)  # Push the step-specific checkpoint
+
+        # Maybe delete some older checkpoints.
+        if self.args.should_save:
+            # we use mtime as default, filesystems without mtime support will be detected in `_sorted_checkpoints`
+            self._rotate_checkpoints(use_mtime=True, output_dir=run_dir)

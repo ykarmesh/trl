@@ -10,16 +10,16 @@ import pandas as pd
 import getpass
 
 # Define paths
-train_video_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_train_evals/subsampled_16/interaction_videos"
-train_json_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_train_evals/subsampled_16/vlm_inference_results"
-val_video_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_16/interaction_videos"  # Update this path
-val_json_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_16/vlm_inference_results"  # Update this path
-output_dir = "/coc/testnvme/yali30/code/trl/memorybench/generated_data/keyframe_train_dataset_qwen_train_val_16"
+train_video_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_train_evals/subsampled_48_latest/interaction_videos"
+train_json_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_train_evals/subsampled_48_latest/vlm_inference_results"
+val_video_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_48_latest/interaction_videos"  # Update this path
+val_json_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_48_latest/vlm_inference_results"  # Update this path
+output_dir = "/coc/testnvme/yali30/code/trl/memorybench/generated_data/keyframe_dataset_qwen_train_val_48_normalized_range"
 
 # Original dataset paths
 train_dataset_path = "/coc/testnvme/yali30/code/memorybench_dev/new_data/balanced_mmbench_dataset_v2/train/imagenav_cleaned_episodes_latest_instr.json.gz"
 val_dataset_path = "/coc/testnvme/kyadav32/code/gunshi/memorybench/memorybench/data/datasets/hssd/memory_dataset/balanced_mmbench_dataset_v2/val/combined_episodes_with_pddl_subset_cleaned_all_instr_5.json.gz"  # Update this path
-# yali30/findingdory-final-subsampled-16
+# yali30/findingdory-normalized-subsampled-48
 
 # list of valid tasks
 valid_tasks_train = [
@@ -235,7 +235,6 @@ def process_episodes(video_root_dir, json_root_dir, task_goals, valid_tasks):
                         keyframe_lists.append(keyframes)
                     else:
                         keyframe_lists.append([])
-                output_text = json.dumps(keyframe_lists)
             else:
                 # For single-goal tasks, also use a list of lists format with a single inner list
                 if len(all_keyframes) > 0:
@@ -243,16 +242,34 @@ def process_episodes(video_root_dir, json_root_dir, task_goals, valid_tasks):
                     keyframe_lists = [keyframe_indices]  # Single list inside a list
                 else:
                     keyframe_lists = [[]]  # Empty list inside a list
-                output_text = json.dumps(keyframe_lists)
-                    
+            
+            # Map the original keyframe indices to the subsampled indices
+            original_to_subsampled_idx = task_data["original_to_subsampled_idx"]
+            mapped_keyframe_lists = []
+            for sublist in keyframe_lists:
+                mapped_sublist = []
+                for idx in sublist:
+                    if idx == -1:
+                        print(f"Warning: Found idx -1 in task {task_id}, episode {ep_id}. Keeping as -1.")
+                        mapped_sublist.append(-1)
+                    else:
+                        mapped_sublist.append(int(original_to_subsampled_idx[str(idx)]))
+                mapped_keyframe_lists.append(mapped_sublist)
+                        
+            # Use the mapped indices for the output
+            output_text = json.dumps(mapped_keyframe_lists)
             task_goal = task_goals[ep_id][task_id]
+            
+            # Fix specific text in task 57 goal
+            if task_id == "task_57" and "object you that you" in task_goal:
+                task_goal = task_goal.replace("object you that you", "object that you")
             
             # Create entry in the new format
             entry = {
                 "id": f"ep_{ep_id}_{task_id}",
                 "video_path": video_path,  # Save local path to video
                 "qa": json.dumps([{
-                    "question": f"The robot's goal is: {task_goal} Which frame indices should the robot move to in order to complete this task?",
+                    "question": f"The robot's goal is: {task_goal}",
                     "answer": output_text
                 }])
             }

@@ -168,6 +168,8 @@ def main():
     parser.add_argument("--trust_remote_code", action="store_true", help="Trust remote code")
     parser.add_argument("--torch_dtype", type=str, default=None, help="Override torch dtype")
     parser.add_argument("--output_file", type=str, default="evaluation_results.json", help="Output file for results")
+    parser.add_argument("--apply_liger", action="store_true", help="Apply liger kernels to the model")
+    parser.add_argument("--split", type=str, default="validation", help="Split to evaluate on")
     
     args = parser.parse_args()
     
@@ -205,7 +207,25 @@ def main():
     except Exception as e:
         print(f"Error loading checkpoint: {e}")
         print("Falling back to base model...")
-    
+        
+    # apply liger kernel patch
+    if args.apply_liger:
+        print("Applying liger kernels to the loaded model !")
+        from liger_kernel.transformers import _apply_liger_kernel_to_instance
+        from transformers.modeling_utils import PreTrainedModel
+        if isinstance(model, PreTrainedModel):
+            # Patch the model with liger kernels. Use the default kernel configurations.
+            _apply_liger_kernel_to_instance(model=model)
+        elif hasattr(model, "get_base_model") and isinstance(model.get_base_model(), PreTrainedModel):
+            # Patch the base model with liger kernels where model is a PeftModel. Use the default kernel configurations.
+            _apply_liger_kernel_to_instance(model=model.get_base_model())
+        else:
+            logger.warning(
+                "The model is not an instance of PreTrainedModel. No liger kernels will be applied."
+            )
+    else:
+        print("Liger Kernels NOT applied to loaded model !")
+        
     # Put model in evaluation mode
     model.eval()
     
@@ -215,11 +235,12 @@ def main():
     )
     
     # Load dataset
-    print(f"Loading dataset {args.dataset_name}...")
-    dataset = load_dataset(args.dataset_name, name=args.dataset_config, split="train")
+    print(f"Loading dataset: {args.dataset_name} --- split: {args.split}...")
+    dataset = load_dataset(args.dataset_name, name=args.dataset_config, split=args.split)
     
     # Calculate total examples and indices to sample
     total_examples = len(dataset)
+    print(f"Found total samples: {total_examples}")
     if args.max_samples != -1:
         # Calculate step size to spread samples across dataset
         step = max(1, total_examples // args.max_samples)
@@ -233,6 +254,9 @@ def main():
     # Prepare dataset
     print("Preparing dataset for evaluation...")
     if "findingdory" in args.dataset_name:
+        # karmesh fix to sample 26 examples only for overfit test
+        # allowed_tasks = ["1"]
+        # dataset = dataset.filter(lambda x: x["id"].split('_')[-1] in allowed_tasks and x["id"].split('_')[1][0] == "5" and len(x["id"].split('_')[1]) == 3)
         prepared_examples = [prepare_custom_dataset(example) for example in dataset]
     else:
         prepared_examples = [prepare_dataset(example, args.video_cache_dir) for example in dataset]
@@ -246,7 +270,7 @@ def main():
         try:
             # Process the input
             messages = example["messages"]
-            print("Sample: ", example)
+            # print("Sample: ", example)
             ground_truth = example["ground_truth"]
             
             # Get video path from messages
@@ -266,13 +290,16 @@ def main():
                 ).to(device)
                 
                 # Generate output
-                output_ids = model.generate(
+                output_obj = model.generate(
                     **inputs,
                     max_new_tokens=512,
+                    output_logits=True,
+                    return_dict_in_generate=True,
                     do_sample=False,
-                    temperature=1.0,
+                    use_cache=True
                 )
-                
+                output_ids = output_obj.sequences
+                                    
                 # Decode output
                 output_text = processor.tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
                 

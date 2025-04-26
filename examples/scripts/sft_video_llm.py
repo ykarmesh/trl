@@ -91,12 +91,15 @@ def download_video(url: str, cache_dir: str) -> str:
         raise Exception(f"Failed to download video: {e}") from e
 
 
-def prepare_custom_dataset(example: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def prepare_custom_dataset(example: dict[str, Any], use_system_message: bool) -> dict[str, list[dict[str, Any]]]:
     """Prepare custom dataset example for training (specifically for findingdory dataset)."""
     video_path = example["video_path"]
     qa_pairs = json.loads(example["qa"])
 
-    system_message = "You are an expert and intelligent question answering agent. You will be shown a video that was collected by a robot yesterday while navigating around a house and picking and placing objects. Each frame in the video has a unique frame index in the top left corner of the video along with the time of day information. Your job is to help the robot complete a task today by looking at the video and finding the frame indices that the robot should move to. Note: The robot uses a magic grasp action to pick up an object, where a gripper goes close to the object and the object gets magically picked up. When deciding which frame indices to choose, make sure you choose the frame indices that are closest to the object/place."
+    if use_system_message:
+        system_message = "You are an expert and intelligent question answering agent. You will be shown a video that was collected by a robot yesterday while navigating around a house and picking and placing objects. Each frame in the video has a unique frame index in the top left corner of the video along with the time of day information. Your job is to help the robot complete a task today by looking at the video and finding the frame indices that the robot should move to. Note: The robot uses a magic grasp action to pick up an object, where a gripper goes close to the object and the object gets magically picked up. When deciding which frame indices to choose, make sure you choose the frame indices that are closest to the object/place."
+    else:
+        system_message = ""
 
     qa_pair = qa_pairs[0]
 
@@ -257,6 +260,7 @@ class CustomScriptArguments(ScriptArguments):
     video_cache_dir: str = field(default="/tmp/videos/", metadata={"help": "Video cache directory."})
     train_samples: int = field(default=-1, metadata={"help": "Maximum number of samples to use for training."})
     eval_samples: int = field(default=-1, metadata={"help": "Maximum number of samples to use for evaluation."})
+    use_system_message: bool = field(default=False, metadata={"help": "Whether to use a system message."})
 
 if __name__ == "__main__":
     # Parse arguments
@@ -328,8 +332,9 @@ if __name__ == "__main__":
         # allowed_tasks = ["1"]
         # dataset = dataset.filter(lambda x: x["id"].split('_')[-1] in allowed_tasks and x["id"].split('_')[1][0] == "5" and len(x["id"].split('_')[1]) == 3)
         # eval_dataset = eval_dataset.filter(lambda x: x["id"].split('_')[-1] in allowed_tasks and x["id"].split('_')[1][0] == "5" and len(x["id"].split('_')[1]) == 3)
-        prepared_dataset = [prepare_custom_dataset(example) for example in dataset]
-        prepared_eval_dataset = [prepare_custom_dataset(example) for example in eval_dataset]
+        print(f"Using system message: {script_args.use_system_message}")
+        prepared_dataset = [prepare_custom_dataset(example, use_system_message=script_args.use_system_message) for example in dataset]
+        prepared_eval_dataset = [prepare_custom_dataset(example, use_system_message=script_args.use_system_message) for example in eval_dataset]
     else:   
         prepared_dataset = [prepare_dataset(example, script_args.video_cache_dir) for example in dataset]
         prepared_eval_dataset = [prepare_dataset(example, script_args.video_cache_dir) for example in eval_dataset]

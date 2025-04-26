@@ -155,31 +155,42 @@ def print_user_totals(lines, filtered_partition):
     user_data = {}
     for job in running_jobs:
         user, tres_alloc, partition = job[0], job[1], job[3]
-        is_overcap = partition in ("overcap", "scavenger")
+        is_overcap = partition == "overcap"
+        is_scavenger = partition == "scavenger"
 
         # Initialize user entry if not present
         if user not in user_data:
             user_data[user] = {
-                gpu: [0, 0, 0] for gpu in sorted_gpu_types
-            }  # [non-overcap, overcap, total]
+                gpu: [0, 0, 0, 0] for gpu in sorted_gpu_types
+            }  # [non-overcap, overcap, scavenger, total]
             user_data[user]["total_gpus"] = 0
 
         # Extract GPU information and update user data
         gpu_info = re.findall(r"gres/gpu=(\d+),gres/gpu:(\w+)=\d+", tres_alloc)
         for count, gpu_type in gpu_info:
             count = int(count)
-            user_data[user][gpu_type][0 if not is_overcap else 1] += count
-            user_data[user][gpu_type][2] += count
+            idx = 0
+            if is_overcap:
+                idx = 1
+            elif is_scavenger:
+                idx = 2
+            user_data[user][gpu_type][idx] += count
+            user_data[user][gpu_type][3] += count
             user_data[user]["total_gpus"] += count
 
         cpus = int(re.search(r"cpu=(\d+)", tres_alloc).group(1))
-        user_data[user]["cpu"][0 if not is_overcap else 1] += cpus
-        user_data[user]["cpu"][2] += cpus
+        idx = 0
+        if is_overcap:
+            idx = 1
+        elif is_scavenger:
+            idx = 2
+        user_data[user]["cpu"][idx] += cpus
+        user_data[user]["cpu"][3] += cpus
 
     user_width = max(len(user) for user in user_data)
 
     if filtered_partition == "all":
-        legend = "Legend: <lab+overcap usage> (<lab-usage>, <overcap-usage>)"
+        legend = "Legend: <lab+overcap+scavenger usage> (<lab-usage>, <overcap-usage>, <scavenger-usage>)"
     else:
         legend = "Legend: <lab usage>"
 
@@ -205,12 +216,12 @@ def print_user_totals(lines, filtered_partition):
         if user_data["total_gpus"] > 0:
             row = [user.rjust(user_width)]
             for gpu in sorted_gpu_types:
-                non_overcap, overcap, total = user_data[gpu]
+                non_overcap, overcap, scavenger, total = user_data[gpu]
 
                 if filtered_partition == "all":
-                    row.append(f"{total: >4} " + f"({non_overcap}/{overcap})".ljust(11))
+                    row.append(f"{total: >4} " + f"({non_overcap}/{overcap}/{scavenger})".ljust(11))
                 else:
-                    row.append(f"{user_data[gpu][2]}".rjust(8))
+                    row.append(f"{user_data[gpu][3]}".rjust(8))
 
             row.append(f"{user_data['total_gpus']}".rjust(11))
             print(" ".join(row))

@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=mmbench_sample
-#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_apr_22/full-ft-lr5e6-epoch1-3B-%j.out
-#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_apr_22/full-ft-lr5e6-epoch1-3B-%j.err
+#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_apr_22/full-ft-lr25e6-epoch10-3B-%j.out
+#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_apr_22/full-ft-lr25e6-epoch10-3B-%j.err
 #SBATCH --gpus=a40:8
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=10
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-node=8
 #SBATCH --exclude=gideon,irona,calculon,bb8,walle,xaea-12,puma
 #SBATCH --qos="short"
 #SBATCH --partition=kira-lab
@@ -33,17 +33,17 @@ accelerate launch --config_file examples/accelerate_configs/deepspeed_zero3.yaml
     --model_name_or_path Qwen/Qwen2.5-VL-3B-Instruct \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
-    --num_train_epochs 1 \
+    --num_train_epochs 10 \
     --logging_steps 1 \
     --log_level debug \
     --log_level_replica debug \
     --save_strategy steps \
-    --save_steps 200 \
+    --save_steps 400 \
     --report_to wandb \
     --push_to_hub False \
-    --output_dir runs/apr_22/full-ft-lr5e6-epoch1-3B \
+    --output_dir runs/apr_22/full-ft-lr25e6-epoch10-3B \
     --optim adamw_torch_fused \
-    --learning_rate 5e-6 \
+    --learning_rate 2.5e-6 \
     --max_grad_norm 0.3 \
     --weight_decay 0.0 \
     --warmup_ratio 0.1 \
@@ -57,12 +57,12 @@ accelerate launch --config_file examples/accelerate_configs/deepspeed_zero3.yaml
     --dataloader_prefetch_factor 1 \
     --do_eval True \
     --eval_strategy steps \
-    --eval_steps 10 \
+    --eval_steps 100 \
     --eval_on_start True \
     --per_device_eval_batch_size 1 \
     --bf16_full_eval True \
-    --eval_samples 64 \
-    # --resume_from_checkpoint /srv/flash1/yali30/code/trl/runs/apr_22/no-liger-full-ft-lr6e5-epoch4-correct-3B/checkpoint-latest
+    --eval_samples 64
+    # --resume_from_checkpoint /srv/flash1/yali30/code/trl/runs/apr_22/full-ft-lr5e6-epoch5-3B/checkpoint-latest
     # --dataloader_persistent_workers True \
     # --dataloader_pin_memory True \
     # --use_peft \

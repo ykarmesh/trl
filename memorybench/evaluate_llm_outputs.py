@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from typing import List, Dict
 import numpy as np
+import matplotlib.pyplot as plt
+import random
 
 def parse_list_string(list_string: str) -> List[List[int]]:
     """
@@ -124,111 +126,227 @@ def evaluate_results(results_file: str) -> Dict:
         "exact_accuracy": exact_accuracy
     }
 
-def evaluate_directory(input_dir: str, output_file: str):
+def evaluate_directory(root_dir: str, output_file: str):
     """
-    Evaluate all JSON files in the directory and save combined results.
+    Recursively evaluate all JSON files in nested directories and save combined results.
+    Handles structure: root_dir/model_dir/evals/checkpoint-X.json
     """
-    # Get all JSON files in the directory
-    json_files = list(Path(input_dir).glob('*.json'))
-    print(f"Found {len(json_files)} JSON files to evaluate")
-    
-    # Skip the combined results file if it exists in the directory
-    json_files = [f for f in json_files if f.name != os.path.basename(output_file)]
-    
-    # Evaluate each file
+    root_path = Path(root_dir)
     all_results = []
-    for json_file in json_files:
-        print(f"\nEvaluating {json_file.name}...")
-        metrics = evaluate_results(str(json_file))
-        
-        # Add filename to metrics
-        metrics["file_name"] = json_file.name
-        all_results.append(metrics)
-        
-        # Print individual file results
-        print(f"Results for {json_file.name}:")
-        print(f"Total examples: {metrics['total_examples']}")
-        print(f"Exact matches: {metrics['exact_matches']}")
-        print(f"Average relaxed score: {metrics['avg_relaxed_score']:.4f}")
-        print(f"Exact accuracy: {metrics['exact_accuracy']:.4f}")
     
-    # Plot the results
-    print("\nCreating accuracy comparison plot...")
-    try:
-        import matplotlib.pyplot as plt
-        import numpy as np
-        
-        # Extract data for plotting and clean up file names
-        results_with_names = []
-        for result in all_results:
-            name = result["file_name"]
-            if name.startswith("no_liger_epoch4_ckpt_2400"):
-                name = name.replace("no_liger_epoch4_ckpt_2400_", "")
+    # Find all model directories
+    model_dirs = [d for d in root_path.iterdir() if d.is_dir()]
+    print(f"Found {len(model_dirs)} model directories to evaluate")
+    
+    # Process each model directory
+    for model_dir in model_dirs:
+        model_name = model_dir.name
+        # Clean model name for display (remove "resume-" prefix)
+        display_name = model_name
+        if model_name.startswith("resume-"):
+            display_name = model_name[len("resume-"):]
             
-            # Extract sample number from filename (assumes format like "500_sample_val.json")
-            sample_num = 0
-            try:
-                sample_num = int(name.split("_")[0])
-            except (ValueError, IndexError):
-                pass
-                
-            results_with_names.append((sample_num, name, result))
+        evals_dir = model_dir / "evals"
         
-        # Sort results by sample number
-        results_with_names.sort()  # Sorts by first element (sample_num)
+        if not evals_dir.exists() or not evals_dir.is_dir():
+            print(f"No 'evals' directory found in {model_name}, skipping")
+            continue
+            
+        # Get all JSON files in the evals directory and skip "checkpoint-latest.json"
+        json_files = [f for f in evals_dir.glob('*.json') if f.name != "checkpoint-latest.json"]
+        print(f"Found {len(json_files)} JSON files in {model_name}/evals")
         
-        # Extract the sorted data
-        file_names = [item[1] for item in results_with_names]
-        exact_accuracies = [item[2]["exact_accuracy"] for item in results_with_names]
-        relaxed_accuracies = [item[2]["avg_relaxed_score"] for item in results_with_names]
-        
-        # Create figure and axis
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        # Set width of bars
-        bar_width = 0.35
-        x = np.arange(len(file_names))
-        
-        # Create bars
-        ax.bar(x - bar_width/2, exact_accuracies, bar_width, label='Exact Accuracy')
-        ax.bar(x + bar_width/2, relaxed_accuracies, bar_width, label='Relaxed Accuracy')
-        
-        # Add labels, title and legend
-        ax.set_xlabel('Number of evaluation samples')
-        ax.set_ylabel('Accuracy')
-        ax.set_title('Comparison of Exact and Relaxed Accuracy by Number of Evaluation Samples')
-        ax.set_xticks(x)
-        ax.set_xticklabels(file_names, rotation=45, ha='right')
-        ax.legend()
-        
-        # Adjust layout and save
-        fig.tight_layout()
-        plt.savefig('/srv/flash1/yali30/code/trl/runs/eval_string_match_apr_21/accuracy_comparison.png')
-        print("Plot saved as 'accuracy_comparison.png'")
-    except ImportError:
-        print("Could not create plot: matplotlib is not installed")
+        # Evaluate each checkpoint file
+        for json_file in json_files:
+            print(f"\nEvaluating {model_name}/evals/{json_file.name}...")
+            metrics = evaluate_results(str(json_file))
+            
+            # Extract checkpoint number
+            checkpoint_name = json_file.stem  # Remove .json extension
+            checkpoint_num = 0
+            if checkpoint_name.startswith("checkpoint-"):
+                try:
+                    checkpoint_num = int(checkpoint_name.split("-")[1])
+                except (ValueError, IndexError):
+                    pass
+            
+            # Add model and checkpoint info to metrics
+            metrics["model_name"] = model_name
+            metrics["display_name"] = display_name  # Store cleaned name
+            metrics["checkpoint_name"] = checkpoint_name
+            metrics["checkpoint_num"] = checkpoint_num
+            metrics["file_path"] = str(json_file)
+            all_results.append(metrics)
+            
+            # Print individual file results
+            print(f"Results for {model_name}/{checkpoint_name}:")
+            print(f"Total examples: {metrics['total_examples']}")
+            print(f"Exact matches: {metrics['exact_matches']}")
+            print(f"Average relaxed score: {metrics['avg_relaxed_score']:.4f}")
+            print(f"Exact accuracy: {metrics['exact_accuracy']:.4f}")
     
-    # Calculate average metrics across all files
+    # Create plots for the results
+    if not all_results:
+        print("No results to plot.")
+        return
+    
+    # Group results by model using the display name
+    model_results = {}
+    for result in all_results:
+        display_name = result["display_name"]
+        if display_name not in model_results:
+            model_results[display_name] = []
+        model_results[display_name].append(result)
+    
+    # Sort results by checkpoint number within each model
+    for model_name in model_results:
+        model_results[model_name].sort(key=lambda x: x["checkpoint_num"])
+    
+    # Generate a unique visual style for each model
+    # Define a set of high-contrast colors arranged for maximum sequential contrast
+    colors = [
+        '#FF0000',  # Red
+        '#0000FF',  # Blue
+        '#00FF00',  # Green
+        '#800080',  # Purple
+        '#FFFF00',  # Yellow
+        '#00FFFF',  # Cyan
+        '#FF00FF',  # Magenta
+        '#000000',  # Black
+        '#FFA500',  # Orange
+        '#008000',  # Dark Green
+        '#00CED1',  # Turquoise
+        '#800000',  # Dark Red
+        '#32CD32',  # LimeGreen
+        '#000080',  # Navy
+        '#FF4500',  # OrangeRed
+        '#1E90FF',  # DodgerBlue
+        '#8A2BE2',  # Violet
+        '#696969',  # DimGray
+        '#FF1493',  # DeepPink
+        '#FFC0CB',  # Pink
+    ]
+    
+    # Use varied line styles for additional differentiation
+    line_styles = ['-', '--', '-.', ':']
+    line_widths = [2.0, 2.5, 3.0]
+    
+    # Create a systematic combination that maximizes contrast
+    style_combinations = []
+    
+    # Create combinations in order, ensuring adjacent combinations have maximum contrast
+    for line_style in line_styles:
+        for line_width in line_widths:
+            for color in colors:
+                style_combinations.append({
+                    'color': color,
+                    'linestyle': line_style,
+                    'linewidth': line_width
+                })
+    
+    # Assign a unique style to each model
+    model_styles = {}
+    model_names = list(model_results.keys())
+    
+    # Assign styles sequentially - the style_combinations are already optimized for contrast
+    for i, model_name in enumerate(model_names):
+        style_idx = i % len(style_combinations)
+        model_styles[model_name] = style_combinations[style_idx]
+    
+    # Create figure for exact accuracy
+    plt.figure(figsize=(14, 10))
+        
+    for model_name, results in model_results.items():
+        checkpoint_nums = [r["checkpoint_num"] for r in results]
+        exact_accuracies = [r["exact_accuracy"] for r in results]
+        
+        style = model_styles[model_name]
+        
+        plt.plot(checkpoint_nums, exact_accuracies, 
+                 color=style['color'],
+                 linestyle=style['linestyle'],
+                 linewidth=style['linewidth'],
+                 label=model_name)
+    
+    # Add vertical lines for epoch boundaries
+    epoch_checkpoints = [1133, 2266, 3399, 4532]
+    for i, checkpoint in enumerate(epoch_checkpoints):
+        plt.axvline(x=checkpoint, color='gray', linestyle=':', linewidth=1.5, alpha=0.7)
+        # Use axes coordinates to position labels
+        plt.annotate(f'Epoch {i+1}', xy=(checkpoint, 0.01), xycoords=('data', 'axes fraction'),
+                 fontsize=12, rotation=90, va='bottom', ha='center',
+                 bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="none", alpha=0.7))
+    
+    plt.xlabel('Checkpoint Number', fontsize=14)
+    plt.ylabel('Exact Accuracy', fontsize=14)
+    plt.title('Exact Accuracy by Checkpoint', fontsize=16, fontweight='bold')
+    
+    # Create a more readable legend with columns if there are many models
+    legend_cols = 1
+    if len(model_results) > 10:
+        legend_cols = 2
+    if len(model_results) > 20:
+        legend_cols = 3
+        
+    plt.legend(fontsize=11, loc='best', framealpha=0.9, ncol=legend_cols)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    exact_plot_path = os.path.join(os.path.dirname(output_file), 'exact_accuracy_plot.png')
+    plt.savefig(exact_plot_path, dpi=300, bbox_inches='tight')
+    print(f"Exact accuracy plot saved to: {exact_plot_path}")
+    plt.close()
+    
+    # Create figure for relaxed accuracy
+    plt.figure(figsize=(14, 10))
+    
+    for model_name, results in model_results.items():
+        checkpoint_nums = [r["checkpoint_num"] for r in results]
+        relaxed_accuracies = [r["avg_relaxed_score"] for r in results]
+        
+        # Use exactly the same style as in the exact accuracy plot
+        style = model_styles[model_name]
+        
+        plt.plot(checkpoint_nums, relaxed_accuracies, 
+                 color=style['color'],
+                 linestyle=style['linestyle'],
+                 linewidth=style['linewidth'],
+                 label=model_name)
+    
+    # Add vertical lines for epoch boundaries
+    for i, checkpoint in enumerate(epoch_checkpoints):
+        plt.axvline(x=checkpoint, color='gray', linestyle=':', linewidth=1.5, alpha=0.7)
+        # Use axes coordinates to position labels
+        plt.annotate(f'Epoch {i+1}', xy=(checkpoint, 0.01), xycoords=('data', 'axes fraction'),
+                 fontsize=12, rotation=90, va='bottom', ha='center',
+                 bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="none", alpha=0.7))
+    
+    plt.xlabel('Checkpoint Number', fontsize=14)
+    plt.ylabel('Relaxed Accuracy', fontsize=14)
+    plt.title('Relaxed Accuracy by Checkpoint', fontsize=16, fontweight='bold')
+    plt.legend(fontsize=11, loc='best', framealpha=0.9, ncol=legend_cols)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    relaxed_plot_path = os.path.join(os.path.dirname(output_file), 'relaxed_accuracy_plot.png')
+    plt.savefig(relaxed_plot_path, dpi=300, bbox_inches='tight')
+    print(f"Relaxed accuracy plot saved to: {relaxed_plot_path}")
+    plt.close()
+    
+    # Calculate average metrics across all results
     num_files = len(all_results)
-    if num_files > 0:
-        avg_metrics = {
-            "average_exact_accuracy": sum(r["exact_accuracy"] for r in all_results) / num_files,
-            "average_relaxed_score": sum(r["avg_relaxed_score"] for r in all_results) / num_files,
-            "total_files_evaluated": num_files,
-            "total_examples_across_files": sum(r["total_examples"] for r in all_results),
-        }
-    else:
-        avg_metrics = {
-            "average_exact_accuracy": 0.0,
-            "average_relaxed_score": 0.0,
-            "total_files_evaluated": 0,
-            "total_examples_across_files": 0,
-        }
+    avg_metrics = {
+        "average_exact_accuracy": sum(r["exact_accuracy"] for r in all_results) / num_files if num_files > 0 else 0.0,
+        "average_relaxed_score": sum(r["avg_relaxed_score"] for r in all_results) / num_files if num_files > 0 else 0.0,
+        "total_files_evaluated": num_files,
+        "total_examples_across_files": sum(r["total_examples"] for r in all_results),
+    }
     
     # Combine all results
     final_results = {
         "individual_file_results": all_results,
-        "average_metrics": avg_metrics
+        "average_metrics": avg_metrics,
+        "model_names": list(model_results.keys())
     }
     
     # Save combined results
@@ -236,6 +354,7 @@ def evaluate_directory(input_dir: str, output_file: str):
         json.dump(final_results, f, indent=2)
     
     print(f"\nFinal Results:")
+    print(f"Total models evaluated: {len(model_results)}")
     print(f"Total files evaluated: {avg_metrics['total_files_evaluated']}")
     print(f"Total examples across all files: {avg_metrics['total_examples_across_files']}")
     print(f"Average exact accuracy: {avg_metrics['average_exact_accuracy']:.4f}")
@@ -243,9 +362,9 @@ def evaluate_directory(input_dir: str, output_file: str):
     print(f"\nDetailed results saved to: {output_file}")
 
 def main():
-    input_dir = "/srv/flash1/yali30/code/trl/runs/eval_string_match_apr_21"
-    output_file = "/srv/flash1/yali30/code/trl/runs/eval_string_match_apr_21/aggregated_results.json"
-    evaluate_directory(input_dir, output_file)
+    root_dir = "/srv/flash1/yali30/code/trl/runs/apr_22"
+    output_file = "/srv/flash1/yali30/code/trl/runs/apr_22/aggregated_results.json"
+    evaluate_directory(root_dir, output_file)
 
 if __name__ == "__main__":
     main()

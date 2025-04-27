@@ -66,12 +66,16 @@ def download_video(url: str, cache_dir: str) -> str:
         raise Exception(f"Failed to download video: {e}") from e
 
 
-def prepare_custom_dataset(example: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def prepare_custom_dataset(example: dict[str, Any], use_system_message: bool) -> dict[str, list[dict[str, Any]]]:
     """Prepare custom dataset example for evaluation (specifically for findingdory dataset)."""
     video_path = example["video_path"]
     qa_pairs = json.loads(example["qa"])
+    task_id = example["id"].split("_")[-1]
 
-    system_message = "You are an expert and intelligent question answering agent. You will be shown a video that was collected by a robot yesterday while navigating around a house and picking and placing objects. Each frame in the video has a unique frame index in the top left corner of the video along with the time of day information. Your job is to help the robot complete a task today by looking at the video and finding the frame indices that the robot should move to. Note: The robot uses a magic grasp action to pick up an object, where a gripper goes close to the object and the object gets magically picked up. When deciding which frame indices to choose, make sure you choose the frame indices that are closest to the object/place."
+    if use_system_message:
+        system_message = "You are an expert and intelligent question answering agent. You will be shown a video that was collected by a robot yesterday while navigating around a house and picking and placing objects. Each frame in the video has a unique frame index in the top left corner of the video along with the time of day information. Your job is to help the robot complete a task today by looking at the video and finding the frame indices that the robot should move to. Note: The robot uses a magic grasp action to pick up an object, where a gripper goes close to the object and the object gets magically picked up. When deciding which frame indices to choose, make sure you choose the frame indices that are closest to the object/place."
+    else:
+        system_message = ""
     
     qa_pair = qa_pairs[0]
 
@@ -88,7 +92,8 @@ def prepare_custom_dataset(example: dict[str, Any]) -> dict[str, list[dict[str, 
 
     return {
         "messages": messages,
-        "ground_truth": qa_pair["answer"]
+        "ground_truth": qa_pair["answer"],
+        "task_id": task_id
     }
 
 
@@ -170,6 +175,7 @@ def main():
     parser.add_argument("--output_file", type=str, default="evaluation_results.json", help="Output file for results")
     parser.add_argument("--apply_liger", action="store_true", help="Apply liger kernels to the model")
     parser.add_argument("--split", type=str, default="validation", help="Split to evaluate on")
+    parser.add_argument("--use_system_message", type=bool, default=False, help="Use system message")
     
     args = parser.parse_args()
     
@@ -257,7 +263,8 @@ def main():
         # karmesh fix to sample 26 examples only for overfit test
         # allowed_tasks = ["1"]
         # dataset = dataset.filter(lambda x: x["id"].split('_')[-1] in allowed_tasks and x["id"].split('_')[1][0] == "5" and len(x["id"].split('_')[1]) == 3)
-        prepared_examples = [prepare_custom_dataset(example) for example in dataset]
+        print(f"Using system message: {args.use_system_message}")
+        prepared_examples = [prepare_custom_dataset(example, args.use_system_message) for example in dataset]
     else:
         prepared_examples = [prepare_dataset(example, args.video_cache_dir) for example in dataset]
     
@@ -272,6 +279,7 @@ def main():
             messages = example["messages"]
             # print("Sample: ", example)
             ground_truth = example["ground_truth"]
+            task_id = example["task_id"]
             
             # Get video path from messages
             video_path = next(
@@ -313,6 +321,7 @@ def main():
                 # Store results
                 example_result = {
                     "example_id": i,
+                    "task_id": task_id,
                     "video": os.path.basename(video_path),
                     "ground_truth": ground_truth,
                     "model_output": output_text,
@@ -323,6 +332,7 @@ def main():
                 # Print results
                 print(f"\nExample {i}:")
                 print(f"Video: {os.path.basename(video_path)}")
+                print(f"Task ID: {task_id}")
                 print(f"Ground Truth: {ground_truth}")
                 print(f"Model Output: {output_text}")
                 print(f"Exact Match: {exact_match:.1f}")

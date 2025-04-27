@@ -126,7 +126,8 @@ srun -u python examples/scripts/evaluate_video_llm.py \
     --bf16 \
     --torch_dtype bfloat16 \
     --output_file $OUTPUT_FILE \
-    --split validation
+    --split validation \
+    --use_system_message True
 EOT
         
         # Wait a bit between submissions to avoid overwhelming the scheduler
@@ -135,3 +136,7 @@ EOT
 done
 
 echo "All evaluation jobs submitted!"
+
+
+# Script Usage
+# SPECIFIC_DIRS="runs/apr_22/full-ft-lr1e5-epoch3-3B" MIN_CHECKPOINT=1000 ./eval_string_match.sh

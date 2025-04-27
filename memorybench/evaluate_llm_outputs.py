@@ -68,7 +68,9 @@ def calculate_relaxed_match(pred_lists: List[List[int]], gt_lists: List[List[int
     precision_all_goals = []
     for pred_sublist, gt_sublist in zip(pred_lists, gt_lists):
         # If none of the predicted elements appear in ground truth sublist, return 0
-        if len(pred_sublist) == 0:
+        if len(pred_sublist) == 0 and len(gt_sublist) == 0:
+            precision = 1.0
+        elif len(pred_sublist) == 0 or len(gt_sublist) == 0:
             precision = 0.0
         else:
             precision = sum(pred_elem in gt_sublist for pred_elem in pred_sublist) / len(pred_sublist)

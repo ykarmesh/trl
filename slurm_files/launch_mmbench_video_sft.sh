@@ -8,7 +8,7 @@
 #SBATCH --ntasks-per-node=8
 #SBATCH --exclude=gideon,irona,calculon,bb8,walle,xaea-12,puma
 #SBATCH --qos="short"
-#SBATCH --partition=kira-lab,overcap
+#SBATCH --partition=overcap
 #SBATCH --requeue
 #SBATCH --signal=USR1@100
 
@@ -62,8 +62,8 @@ accelerate launch --config_file examples/accelerate_configs/deepspeed_zero3.yaml
     --per_device_eval_batch_size 1 \
     --bf16_full_eval True \
     --eval_samples 64 \
-    --use_system_message False
-    # --resume_from_checkpoint /srv/flash1/yali30/code/trl/runs/apr_22/full-ft-lr5e6-epoch5-3B/checkpoint-latest
+    --use_system_message False \
+    --resume_from_checkpoint /srv/flash1/yali30/code/trl/runs/apr_22/full-ft-nosys-lr1e5-epoch3-3B/checkpoint-latest
     # --dataloader_persistent_workers True \
     # --dataloader_pin_memory True \
     # --use_peft \

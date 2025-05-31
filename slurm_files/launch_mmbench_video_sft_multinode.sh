@@ -2,18 +2,23 @@
 #SBATCH --job-name=mmbench_sample
 #SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_may_31/full-ft-lr5e6-epoch5-3B-%j.out
 #SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_may_31/full-ft-lr5e6-epoch5-3B-%j.err
-#SBATCH --gpus=a40:8
-#SBATCH --nodes=1
-#SBATCH --cpus-per-task=10
-#SBATCH --ntasks-per-node=8
+#SBATCH --gres=gpu:a40:8
+#SBATCH --nodes=4
+#SBATCH --cpus-per-task=12
+#SBATCH --ntasks-per-node=1
 #SBATCH --exclude=chomps,ephemeral-3,walle,friday,cyborg,starrysky,hk47,jill,xaea-12,johnny5,calculon,puma
 #SBATCH --qos="short"
 #SBATCH --partition=kira-lab
 #SBATCH --requeue
 #SBATCH --signal=USR1@100
 
-MAIN_ADDR=$(scontrol show hostnames "\${SLURM_JOB_NODELIST}" | head -n 1)
-export MAIN_ADDR
+# Get master node info from SLURM
+export MASTER_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
+# random choose a port between 30000:50000 for master node communitication
+export MASTER_PORT=$(( RANDOM % (50000 - 30000 + 1 ) + 30000 ))
+
+# enable NCCL debug info if needed for debugging
+export NCCL_DEBUG=INFO
 
 export TRANSFORMERS_CACHE=/coc/testnvme/yali30/code/trl/models
 export HF_DATASETS_CACHE=/coc/testnvme/yali30/code/trl/hf_datasets
@@ -27,7 +32,16 @@ conda activate hab_memory_dev
 
 cd /coc/testnvme/yali30/code/trl
 
-accelerate launch --config_file examples/accelerate_configs/deepspeed_zero3.yaml \
+srun --label accelerate launch \
+    --main_process_ip $MASTER_ADDR \
+    --main_process_port $MASTER_PORT \
+    --multi_gpu \
+    --num_processes=$(($SLURM_JOB_NUM_NODES * 8)) \
+    --dynamo_backend=no \
+    --num_machines=$SLURM_JOB_NUM_NODES \
+    --machine_rank=$SLURM_NODEID \
+    --rdzv_backend c10d \
+    --config_file examples/accelerate_configs/deepspeed_zero3_multinode.yaml \
     examples/scripts/sft_video_llm.py \
     --dataset_name yali30/yali30-findingdory-v2-subsampled-48  \
     --dataset_train_split train \

@@ -10,14 +10,14 @@ import pandas as pd
 import getpass
 
 # Define paths
-train_video_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_train_evals/subsampled_48_latest/interaction_videos"
-train_json_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_train_evals/subsampled_48_latest/vlm_inference_results"
+train_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/subsampled_dataset_48/interaction_videos"
+train_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/subsampled_dataset_48/vlm_inference_results"
 val_video_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_48_latest/interaction_videos"  # Update this path
 val_json_root_dir = "/srv/flash1/yali30/code/memorybench_dev/runs/mmbench_evals/oracle_all_task_final_eval/subsampled_dataset_48_latest/vlm_inference_results"  # Update this path
 output_dir = "/coc/testnvme/yali30/code/trl/memorybench/generated_data/keyframe_dataset_qwen_train_val_48_normalized_range"
 
 # Original dataset paths
-train_dataset_path = "/coc/testnvme/yali30/code/memorybench_dev/new_data/balanced_mmbench_dataset_v2/train/imagenav_cleaned_episodes_latest_instr.json.gz"
+train_dataset_path = "/srv/flash1/yali30/code/memorybench_karmesh/new_data/balanced_mmbench_dataset_v3/train/combined_episodes-with_init_and_final_poses_pddl_verified.json.gz"
 val_dataset_path = "/coc/testnvme/kyadav32/code/gunshi/memorybench/memorybench/data/datasets/hssd/memory_dataset/balanced_mmbench_dataset_v2/val/combined_episodes_with_pddl_subset_cleaned_all_instr_5.json.gz"  # Update this path
 # yali30/findingdory-normalized-subsampled-48
 
@@ -29,7 +29,8 @@ valid_tasks_train = [
     "task_7",
     "task_8",
     "task_9",
-    "task_10",  
+    "task_10",
+    "task_11",
     "task_12",
     "task_13",
     "task_14",
@@ -39,10 +40,12 @@ valid_tasks_train = [
     "task_18",  # 18 is sequential task with receptacles and has some issue so the oracle solution doesnt exist currently
     "task_19",
     "task_20",
-    # "task_21",  # 21 has XX:XX timestamp issue as it is not available in the offline dataset
-    # "task_22",  # 22 has XX:XX timestamp issue as it is not available in the offline dataset
+    "task_21",  # 21 has XX:XX timestamp issue as it is not available in the offline dataset
+    "task_22",  # 22 has XX:XX timestamp issue as it is not available in the offline dataset
+    "task_23",
     "task_24",
     "task_25",
+    "task_26",
     "task_27",
     "task_28",
     "task_29",
@@ -56,7 +59,9 @@ valid_tasks_train = [
     "task_38",
     "task_39",
     "task_40",
-    "task_41",  # 41 task was directly assigned 0 SR so we dont store oracle solution for it
+    # "task_41",  # 41 task was directly assigned 0 SR so we dont store oracle solution for it
+    "task_42",
+    "task_43",
     "task_44",
     "task_45",
     "task_46",
@@ -80,6 +85,7 @@ valid_tasks_train = [
     "task_64",
     "task_65",
     "task_66",
+    "task_67",
 ]
 
 valid_tasks_val = [
@@ -258,7 +264,10 @@ def process_episodes(video_root_dir, json_root_dir, task_goals, valid_tasks):
                         
             # Use the mapped indices for the output
             output_text = json.dumps(mapped_keyframe_lists)
-            task_goal = task_goals[ep_id][task_id]
+            if task_goals is not None:
+                task_goal = task_goals[ep_id][task_id]
+            else:
+                task_goal = task_data["task_instruction"]
             
             # Fix specific text in task 57 goal
             if task_id == "task_57" and "object you that you" in task_goal:
@@ -303,7 +312,7 @@ for episode in val_original_dataset['episodes']:
 
 # Process train and validation data separately
 print("Processing training data...")
-train_entries = process_episodes(train_video_root_dir, train_json_root_dir, train_task_goals, valid_tasks_train)
+train_entries = process_episodes(train_video_root_dir, train_json_root_dir, None, valid_tasks_train)
 print("Processing validation data...")
 val_entries = process_episodes(val_video_root_dir, val_json_root_dir, val_task_goals, valid_tasks_val)
 

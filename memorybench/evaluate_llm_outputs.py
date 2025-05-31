@@ -271,7 +271,7 @@ def evaluate_directory(root_dir: str, output_file: str):
                  label=model_name)
     
     # Add vertical lines for epoch boundaries
-    epoch_checkpoints = [1133, 2266, 3399, 4532]
+    epoch_checkpoints = [1133, 2266, 3399, 4532, 5665]
     for i, checkpoint in enumerate(epoch_checkpoints):
         plt.axvline(x=checkpoint, color='gray', linestyle=':', linewidth=1.5, alpha=0.7)
         # Use axes coordinates to position labels

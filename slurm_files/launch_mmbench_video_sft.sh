@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=mmbench_sample
-#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_may_31/full-ft-lr5e6-epoch5-3B-%j.out
-#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_may_31/full-ft-lr5e6-epoch5-3B-%j.err
+#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_jun_6/full-ft-96-frames-lr5e6-epoch5-3B-%j.out
+#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_jun_6/full-ft-96-frames-lr5e6-epoch5-3B-%j.err
 #SBATCH --gpus=a40:8
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=10
 #SBATCH --ntasks-per-node=8
 #SBATCH --exclude=chomps,ephemeral-3,walle,friday,cyborg,starrysky,hk47,jill,xaea-12,johnny5,calculon,puma
-#SBATCH --qos="short"
+#SBATCH --qos="long"
 #SBATCH --partition=kira-lab
 #SBATCH --requeue
 #SBATCH --signal=USR1@100
@@ -29,7 +29,7 @@ cd /coc/testnvme/yali30/code/trl
 
 accelerate launch --config_file examples/accelerate_configs/deepspeed_zero3.yaml \
     examples/scripts/sft_video_llm.py \
-    --dataset_name yali30/yali30-findingdory-v2-subsampled-48  \
+    --dataset_name yali30/findingdory-normalized-96-v3-final \
     --dataset_train_split train \
     --model_name_or_path Qwen/Qwen2.5-VL-3B-Instruct \
     --per_device_train_batch_size 1 \
@@ -42,7 +42,7 @@ accelerate launch --config_file examples/accelerate_configs/deepspeed_zero3.yaml
     --save_steps 200 \
     --report_to wandb \
     --push_to_hub False \
-    --output_dir runs/may_31/full-ft-lr5e6-epoch5-3B \
+    --output_dir runs/jun_6/resume-full-ft-96-frames-lr5e6-epoch5-3B \
     --optim adamw_torch_fused \
     --learning_rate 5e-6 \
     --max_grad_norm 0.3 \
@@ -62,9 +62,9 @@ accelerate launch --config_file examples/accelerate_configs/deepspeed_zero3.yaml
     --eval_on_start True \
     --per_device_eval_batch_size 1 \
     --bf16_full_eval True \
-    --eval_samples 64
+    --eval_samples 64 \
+    --resume_from_checkpoint /srv/flash1/yali30/code/trl/runs/jun_6/full-ft-96-frames-lr5e6-epoch5-3B/checkpoint-latest
     # --use_system_message True
-    # --resume_from_checkpoint /srv/flash1/yali30/code/trl/runs/apr_22/full-ft-nosys-lr1e5-epoch3-3B/checkpoint-latest
     # --dataloader_persistent_workers True \
     # --dataloader_pin_memory True \
     # --use_peft \

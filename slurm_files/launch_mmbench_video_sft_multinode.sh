@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=mmbench_sample
-#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_may_31/full-ft-lr5e6-epoch5-3B-%j.out
-#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_may_31/full-ft-lr5e6-epoch5-3B-%j.err
+#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_may_31/multinode/full-ft-lr5e6-epoch5-3B-%j.out
+#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_may_31/multinode/full-ft-lr5e6-epoch5-3B-%j.err
 #SBATCH --gres=gpu:a40:8
 #SBATCH --nodes=4
 #SBATCH --cpus-per-task=12
@@ -36,6 +36,7 @@ srun --label accelerate launch \
     --main_process_ip $MASTER_ADDR \
     --main_process_port $MASTER_PORT \
     --multi_gpu \
+    --same_network \
     --num_processes=$(($SLURM_JOB_NUM_NODES * 8)) \
     --dynamo_backend=no \
     --num_machines=$SLURM_JOB_NUM_NODES \
@@ -56,7 +57,7 @@ srun --label accelerate launch \
     --save_steps 200 \
     --report_to wandb \
     --push_to_hub False \
-    --output_dir runs/may_31/full-ft-lr5e6-epoch5-3B \
+    --output_dir runs/may_31/mutlinode-full-ft-lr5e6-epoch5-3B \
     --optim adamw_torch_fused \
     --learning_rate 5e-6 \
     --max_grad_norm 0.3 \

@@ -263,6 +263,7 @@ def main():
         # karmesh fix to sample 26 examples only for overfit test
         # allowed_tasks = ["1"]
         # dataset = dataset.filter(lambda x: x["id"].split('_')[-1] in allowed_tasks and x["id"].split('_')[1][0] == "5" and len(x["id"].split('_')[1]) == 3)
+        print(f"Loading dataset name: {args.dataset_name}")
         print(f"Using system message: {args.use_system_message}")
         prepared_examples = [prepare_custom_dataset(example, args.use_system_message) for example in dataset]
     else:

@@ -147,6 +147,7 @@ hf_datasets/
 models/
 memorybench/generated_data
 memorybench/combined_eval_results
+memorybench/final_arxiv_data
 images/
 slurm_logs/
 runs/

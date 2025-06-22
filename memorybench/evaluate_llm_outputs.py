@@ -268,10 +268,12 @@ def evaluate_directory(root_dir: str, output_file: str):
                  color=style['color'],
                  linestyle=style['linestyle'],
                  linewidth=style['linewidth'],
+                 marker='o',
+                 markersize=3,
                  label=model_name)
     
     # Add vertical lines for epoch boundaries
-    epoch_checkpoints = [1133, 2266, 3399, 4532, 5665]
+    epoch_checkpoints = [2568, 5136, 7704, 10272, 12840]
     for i, checkpoint in enumerate(epoch_checkpoints):
         plt.axvline(x=checkpoint, color='gray', linestyle=':', linewidth=1.5, alpha=0.7)
         # Use axes coordinates to position labels
@@ -313,6 +315,8 @@ def evaluate_directory(root_dir: str, output_file: str):
                  color=style['color'],
                  linestyle=style['linestyle'],
                  linewidth=style['linewidth'],
+                 marker='o',
+                 markersize=3,
                  label=model_name)
     
     # Add vertical lines for epoch boundaries
@@ -364,8 +368,8 @@ def evaluate_directory(root_dir: str, output_file: str):
     print(f"\nDetailed results saved to: {output_file}")
 
 def main():
-    root_dir = "/srv/flash1/yali30/code/trl/runs/apr_22"
-    output_file = "/srv/flash1/yali30/code/trl/runs/apr_22/aggregated_results.json"
+    root_dir = "/srv/flash1/yali30/code/trl/runs/jun_6"
+    output_file = "/srv/flash1/yali30/code/trl/runs/jun_6/aggregated_results.json"
     evaluate_directory(root_dir, output_file)
 
 if __name__ == "__main__":

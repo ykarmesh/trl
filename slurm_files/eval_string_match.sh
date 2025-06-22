@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ROOT_DIR="/srv/flash1/yali30/code/trl/runs/apr_22"
+ROOT_DIR="/srv/flash1/yali30/code/trl/runs/jun_6"
 
 # Debug option - set DEBUG_MODE to true and specify a directory to only process that one
 DEBUG_MODE=${DEBUG_MODE:-false}
@@ -97,21 +97,22 @@ for MODEL_DIR in "${DIRS_TO_PROCESS[@]}"; do
         sbatch <<EOT
 #!/bin/bash
 #SBATCH --job-name=eval_mmbench
-#SBATCH --output=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_apr_22/evals/${MODEL_NAME}/${CKPT_ID}-%j.out
-#SBATCH --error=/coc/testnvme/yali30/code/trl/slurm_logs/sft_qwen_train_apr_22/evals/${MODEL_NAME}/${CKPT_ID}-%j.err
+#SBATCH --output=/srv/flash1/yali30/code/trl/slurm_logs/sft_qwen_train_jun_6/evals/${MODEL_NAME}/${CKPT_ID}-%j.out
+#SBATCH --error=/srv/flash1/yali30/code/trl/slurm_logs/sft_qwen_train_jun_6/evals/${MODEL_NAME}/${CKPT_ID}-%j.err
 #SBATCH --gpus=a40:1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=10
 #SBATCH --ntasks-per-node=1
-#SBATCH --exclude=gideon,irona,calculon,bb8,walle,puma,xaea-12
+#SBATCH --exclude=chomps,ephemeral-3,walle,friday,cyborg,starrysky,hk47,jill,xaea-12,johnny5,calculon,puma
 #SBATCH --qos="short"
-#SBATCH --partition=kira-lab,overcap
+#SBATCH --partition=kira-lab
 #SBATCH --requeue
 #SBATCH --signal=USR1@100
 
 export TRANSFORMERS_CACHE=/coc/testnvme/yali30/code/trl/models
 export HF_DATASETS_CACHE=/coc/testnvme/yali30/code/trl/hf_datasets
-export WANDB_API_KEY=a9a6bebaaf7308fe804d6b7e35bb08bf7970cb19
+export WANDB_API_KEY=
+export HUGGINGFACE_HUB_TOKEN=
 
 source /coc/testnvme/yali30/miniforge3/etc/profile.d/conda.sh
 conda deactivate
@@ -122,16 +123,15 @@ cd /coc/testnvme/yali30/code/trl
 srun -u python examples/scripts/evaluate_video_llm.py \
     --checkpoint_dir $CKPT_DIR \
     --model_name_or_path Qwen/Qwen2.5-VL-3B-Instruct \
-    --dataset_name yali30/findingdory-normalized-subsampled-48 \
+    --dataset_name yali30/findingdory-normalized-96-v3-final \
     --bf16 \
     --torch_dtype bfloat16 \
     --output_file $OUTPUT_FILE \
-    --split validation \
-    --use_system_message True
+    --split validation
 EOT
         
         # Wait a bit between submissions to avoid overwhelming the scheduler
-        sleep 2
+        sleep 1
     done
 done
 

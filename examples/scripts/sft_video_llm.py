@@ -332,6 +332,7 @@ if __name__ == "__main__":
         # allowed_tasks = ["1"]
         # dataset = dataset.filter(lambda x: x["id"].split('_')[-1] in allowed_tasks and x["id"].split('_')[1][0] == "5" and len(x["id"].split('_')[1]) == 3)
         # eval_dataset = eval_dataset.filter(lambda x: x["id"].split('_')[-1] in allowed_tasks and x["id"].split('_')[1][0] == "5" and len(x["id"].split('_')[1]) == 3)
+        print(f"Loading dataset name: {script_args.dataset_name}")
         print(f"Using system message: {script_args.use_system_message}")
         prepared_dataset = [prepare_custom_dataset(example, use_system_message=script_args.use_system_message) for example in dataset]
         prepared_eval_dataset = [prepare_custom_dataset(example, use_system_message=script_args.use_system_message) for example in eval_dataset]

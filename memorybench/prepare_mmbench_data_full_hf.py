@@ -21,7 +21,7 @@ train_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/or
 val_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/interaction_videos"
 val_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/vlm_inference_results"
 train_valid_eps_filepath = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/episodes_to_keep.txt"
-output_dir = "/coc/testnvme/yali30/code/trl/memorybench/final_arxiv_data"
+output_dir = "/coc/testnvme/yali30/code/trl/memorybench/final_arxiv_data_fixed"
 
 # Original dataset paths
 # train_dataset_path = "/srv/flash1/yali30/code/memorybench_karmesh/new_data/balanced_mmbench_dataset_v3/train/combined_episodes-with_init_and_final_poses_pddl_verified.json.gz"
@@ -211,7 +211,7 @@ def process_episodes(video_root_dir, json_root_dir, task_goals, valid_tasks, val
         assert os.path.exists(json_ep_dir), f"No JSON directory found for episode {ep_id}"
         
         # Define multi-goal tasks that require selecting frames for each entity
-        multi_goal_tasks = ["task_12", "task_13", "task_14", "task_15", "task_16", "task_18", "task_18", "task_19", "task_20"]
+        multi_goal_tasks = ["task_12", "task_13", "task_14", "task_15", "task_16", "task_17", "task_18", "task_19", "task_20"]
 
         # Process each task JSON file
         for task_file in os.listdir(json_ep_dir):

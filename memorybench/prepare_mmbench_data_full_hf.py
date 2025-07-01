@@ -15,17 +15,25 @@ import tempfile
 import shutil
 import logging
 
-# Define paths
+# Define paths for full dataset
 train_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/interaction_videos"
 train_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/vlm_inference_results"
 val_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/interaction_videos"
 val_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/vlm_inference_results"
 train_valid_eps_filepath = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/episodes_to_keep.txt"
-output_dir = "/coc/testnvme/yali30/code/trl/memorybench/final_arxiv_data_fixed"
+output_dir = "/coc/testnvme/yali30/code/trl/memorybench/arxiv_data_full_fixed"
+
+# Define paths for subsampled dataset
+# train_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/subsampled_dataset_96/interaction_videos"
+# train_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/subsampled_dataset_96/vlm_inference_results"
+# val_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/subsampled_dataset_96/interaction_videos"
+# val_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/subsampled_dataset_96/vlm_inference_results"
+# train_valid_eps_filepath = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/episodes_to_keep.txt"
+# output_dir = "/coc/testnvme/yali30/code/trl/memorybench/arxiv_data_subsampled_96_fixed"
 
 # Original dataset paths
-# train_dataset_path = "/srv/flash1/yali30/code/memorybench_karmesh/new_data/balanced_mmbench_dataset_v3/train/combined_episodes-with_init_and_final_poses_pddl_verified.json.gz"
-# val_dataset_path = "/srv/flash1/yali30/code/memorybench_karmesh/new_data/balanced_mmbench_dataset_v3/val/final_v3-with_init_and_final_poses.json.gz"  # Update this path
+train_dataset_path = "/srv/flash1/yali30/code/memorybench_karmesh/new_data/balanced_mmbench_dataset_v3/train/combined_episodes-with_init_and_final_poses_pddl_verified.json.gz"
+val_dataset_path = "/srv/flash1/yali30/code/memorybench_karmesh/new_data/balanced_mmbench_dataset_v3/val/final_v3-with_init_and_final_poses.json.gz"  # Update this path
 # yali30/findingdory-normalized-subsampled-48
 
 # list of valid tasks
@@ -161,12 +169,96 @@ valid_tasks_val = [
     "task_67",
 ]
 
+# Task categories for various task IDs
+high_level_task_categorization = {
+    "Single-Goal Spatial Tasks": ["Object Recall", "Interaction", "Conditional Interaction", "Object Attributes", "Spatial Relationship", "Room Visitation"],
+    "Single-Goal Temporal Tasks": ["Interaction Order", "Time-Based", "Duration Tracking"],
+    "Multi-Goal Tasks": ["Unordered Revisitation", "Ordered Revisitation"]
+}
+low_level_task_categories = {
+    "All Tasks": [
+        "task_1", "task_2", "task_6", "task_7", "task_8", "task_9", "task_10", "task_11", "task_12", \
+        "task_13", "task_14", "task_15", "task_16", "task_17", "task_18", "task_19", "task_20", "task_21", \
+        "task_22", "task_23", "task_24", "task_25", "task_26", "task_27", "task_28", "task_29", "task_31", \
+        "task_32", "task_33", "task_34", "task_35", "task_36", "task_37", "task_38", "task_39", "task_40", \
+        "task_41", "task_44", "task_45", "task_46", "task_47", "task_48", "task_49", "task_50", "task_51", \
+        "task_52", "task_53", "task_54", "task_55", "task_56", "task_57", "task_58", "task_59", "task_60", \
+        "task_61", "task_62", "task_63", "task_64", "task_65", "task_66",
+    ],
+    # low level categories
+    "Object Recall": ["task_1", "task_2"],
+    "Interaction": ["task_10", "task_11", "task_23", "task_24", "task_26", "task_27"],
+    "Conditional Interaction": ["task_6", "task_7", "task_8", "task_9", "task_25",  "task_28", "task_29"],
+    "Object Attributes": ["task_48", "task_49", "task_50", "task_51", "task_52"],
+    "Spatial Relationship": ["task_31", "task_32", "task_33", "task_34", "task_35"],
+    "Room Visitation": ["task_41","task_44", "task_45", "task_46", "task_47"],
+    "Interaction Order": [
+        "task_36", "task_37", "task_38", "task_39", "task_40",
+        "task_53", "task_54", "task_55", "task_56", "task_57", "task_58", "task_59", 
+        "task_60", "task_61", "task_62", "task_63"
+    ],
+    "Time-Based": ["task_21", "task_22"],
+    "Duration Tracking": ["task_64", "task_65", "task_66"], #, "task_67"],
+    "Unordered Revisitation": ["task_12", "task_13", "task_14", "task_15", "task_16", "task_20"],
+    "Ordered Revisitation": ["task_17", "task_18", "task_19"]
+}
+
+# Create mappings from task_id to categories
+print("Creating task category mappings...")
+
+# Create task_id to low-level category mapping
+task_id_to_low_level_category = {}
+for category, task_ids in low_level_task_categories.items():
+    if category != "All Tasks":  # Skip the "All Tasks" category
+        for task_id in task_ids:
+            task_id_to_low_level_category[task_id] = category
+
+# Create task_id to high-level category mapping
+task_id_to_high_level_category = {}
+for high_level_cat, low_level_cats in high_level_task_categorization.items():
+    for low_level_cat in low_level_cats:
+        if low_level_cat in low_level_task_categories:
+            for task_id in low_level_task_categories[low_level_cat]:
+                task_id_to_high_level_category[task_id] = high_level_cat
+
+# Get all unique task IDs from train and val
+all_train_val_tasks = set(valid_tasks_train + valid_tasks_val)
+print(f"All train/val task IDs: {sorted(all_train_val_tasks)}")
+
+# Check for any missing mappings
+missing_low_level = [task_id for task_id in all_train_val_tasks if task_id not in task_id_to_low_level_category]
+missing_high_level = [task_id for task_id in all_train_val_tasks if task_id not in task_id_to_high_level_category]
+
+if missing_low_level:
+    print(f"WARNING: Tasks missing low-level category mapping: {missing_low_level}")
+if missing_high_level:
+    print(f"WARNING: Tasks missing high-level category mapping: {missing_high_level}")
+
+print(f"Low-level category mapping created for {len(task_id_to_low_level_category)} tasks")
+print(f"High-level category mapping created for {len(task_id_to_high_level_category)} tasks")
+
 # Create output directories
 print(f"Creating output directory: {output_dir}")
 os.makedirs(output_dir, exist_ok=True)
 
+# Load and process train dataset
+with gzip.open(train_dataset_path, 'rb') as f:
+    train_original_dataset = json.load(f)
+
+# Load and process validation dataset
+with gzip.open(val_dataset_path, 'rb') as f:
+    val_original_dataset = json.load(f)
+    
+# Loop through the train and val datasets and create a mapping ep_id to number of interacted objects
+train_ep_id_num_interactions = {}
+val_ep_id_num_interactions = {}
+for ep in train_original_dataset['episodes']:
+    train_ep_id_num_interactions[ep['episode_id']] = len(ep['candidate_objects'])
+for ep in val_original_dataset['episodes']:
+    val_ep_id_num_interactions[ep['episode_id']] = len(ep['candidate_objects'])
+
 # Create a function to process episodes and create dataset entries
-def process_episodes(video_root_dir, json_root_dir, task_goals, valid_tasks, valid_eps_filepath=None):
+def process_episodes(video_root_dir, json_root_dir, ep_id_num_interactions_map, valid_tasks, valid_eps_filepath=None):
     dataset_entries = []
     
     # Find all video files and extract episode IDs
@@ -283,23 +375,26 @@ def process_episodes(video_root_dir, json_root_dir, task_goals, valid_tasks, val
                         
             # Use the mapped indices for the output
             output_text = json.dumps(keyframe_lists)
-            if task_goals is not None:
-                task_goal = task_goals[ep_id][task_id]
-            else:
-                task_goal = task_data["task_instruction"]
+            task_goal = task_data["task_instruction"]
             
             # Fix specific text in task 57 goal
             if task_id == "task_57" and "object you that you" in task_goal:
                 task_goal = task_goal.replace("object you that you", "object that you")
             
-            # Create entry with direct video file path
+            # Get category mappings for this task_id
+            high_level_category = task_id_to_high_level_category.get(task_id, "NA")
+            low_level_category = task_id_to_low_level_category.get(task_id, "NA")
+            
+            # Create entry with direct video file path and category information
             entry = {
-                "id": f"ep_{ep_id}_{task_id}",
+                "ep_id": f"ep_{ep_id}",
                 "video": video_path,  # Direct path - no dictionary wrapper
-                "qa": json.dumps([{
-                    "question": f"The robot's goal is: {task_goal}",
-                    "answer": output_text
-                }])
+                "question": f"The robot's goal is: {task_goal}",
+                "answer": output_text,
+                "task_id": task_id,
+                "high_level_category": high_level_category,
+                "low_level_category": low_level_category,
+                "num_interactions": ep_id_num_interactions_map[ep_id]
             }
                             
             dataset_entries.append(entry)
@@ -308,9 +403,9 @@ def process_episodes(video_root_dir, json_root_dir, task_goals, valid_tasks, val
 
 # Process train and validation data separately
 print("Processing training data...")
-train_entries = process_episodes(train_video_root_dir, train_json_root_dir, None, valid_tasks_train, train_valid_eps_filepath)
+train_entries = process_episodes(train_video_root_dir, train_json_root_dir, train_ep_id_num_interactions, valid_tasks_train, train_valid_eps_filepath)
 print("Processing validation data...")
-val_entries = process_episodes(val_video_root_dir, val_json_root_dir, None, valid_tasks_val, None)
+val_entries = process_episodes(val_video_root_dir, val_json_root_dir, val_ep_id_num_interactions, valid_tasks_val, None)
 
 # Create a videos folder in the current directory
 print(f"Output directory: {output_dir}")
@@ -500,8 +595,7 @@ print(f"Videos zipped to {videos_zip_path}")
 print("Uploading to HuggingFace...")
 
 # Get HuggingFace token
-# hf_token = input("Please enter your HuggingFace token: ")
-hf_token = ""
+hf_token = input("Please enter your HuggingFace token: ")
 login(token=hf_token)
 
 # Set repository name
@@ -536,7 +630,7 @@ except Exception as e:
     print("Continuing to upload videos zip file...")
 
 # Upload the videos zip file separately using HfApi
-repo_name = "yali30/" + repo_name
+# repo_name = "yali30/" + repo_name
 print("Uploading videos zip file...")
 print(f"Repository ID: {repo_name}")
 print(f"Zip file path: {videos_zip_path}")

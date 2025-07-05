@@ -228,6 +228,11 @@ def evaluate_directory(root_dir: str, output_file: str):
         '#FF1493',  # DeepPink
         '#FFC0CB',  # Pink
     ]
+    # colors = [
+    #     '#0077BE',  # Blue
+    #     '#F8D568',  # Yellow
+    #     '#E94E24',  # Orange/Red
+    # ]     # These colors were used in the paper plots
     
     # Use varied line styles for additional differentiation
     line_styles = ['-', '--', '-.', ':']

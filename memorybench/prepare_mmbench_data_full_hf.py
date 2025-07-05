@@ -203,6 +203,77 @@ low_level_task_categories = {
     "Ordered Revisitation": ["task_17", "task_18", "task_19"]
 }
 
+# Define multi-goal tasks that require selecting frames for each entity
+multi_goal_tasks = ["task_12", "task_13", "task_14", "task_15", "task_16", "task_17", "task_18", "task_19", "task_20"]
+
+# Create mapping from exisitng memorybench task_id to task_id used in Table 3 of paper appendix
+task_id_to_skip = ["task_42", "task_43", "task_67"]
+old_task_id_to_new_task_id = {
+    "task_1": "task_1",
+    "task_2": "task_2",
+    "task_6": "task_9",
+    "task_7": "task_10",
+    "task_8": "task_12",
+    "task_9": "task_13",
+    "task_10": "task_7",
+    "task_11": "task_8",
+    "task_12": "task_52",
+    "task_13": "task_53",
+    "task_14": "task_54",
+    "task_15": "task_55",
+    "task_16": "task_56",
+    "task_17": "task_58",  # 17 is sequential task with receptacles and has some issue so the oracle solution doesnt exist currently
+    "task_18": "task_59",  # 18 is sequential task with receptacles and has some issue so the oracle solution doesnt exist currently
+    "task_19": "task_60",
+    "task_20": "task_57",
+    "task_21": "task_47",  # 21 has XX:XX timestamp issue as it is not available in the offline dataset
+    "task_22": "task_48",  # 22 has XX:XX timestamp issue as it is not available in the offline dataset
+    "task_23": "task_3",
+    "task_24": "task_4",
+    "task_25": "task_11",
+    "task_26": "task_5",
+    "task_27": "task_6",
+    "task_28": "task_14",
+    "task_29": "task_15",
+    "task_31": "task_21",
+    "task_32": "task_22",
+    "task_33": "task_23",
+    "task_34": "task_24",
+    "task_35": "task_25",
+    "task_36": "task_31",
+    "task_37": "task_32",
+    "task_38": "task_33",
+    "task_39": "task_34",
+    "task_40": "task_35",
+    "task_41": "task_30",  # 41 task was directly assigned 0 SR so we dont store oracle solution json file for it and will manually append an entry for each episode for HF dataset
+    "task_42": "NA",       # skip task completely
+    "task_43": "NA",       # skip task completely
+    "task_44": "task_26",
+    "task_45": "task_27",
+    "task_46": "task_28",
+    "task_47": "task_29",
+    "task_48": "task_16", # skip for train episodes
+    "task_49": "task_17", # skip for train episodes
+    "task_50": "task_18", # skip for train episodes
+    "task_51": "task_19", # skip for train episodes
+    "task_52": "task_20", # skip for train episodes
+    "task_53": "task_36",
+    "task_54": "task_37",
+    "task_55": "task_38",
+    "task_56": "task_39",
+    "task_57": "task_40",
+    "task_58": "task_41",
+    "task_59": "task_42",
+    "task_60": "task_43",
+    "task_61": "task_44",
+    "task_62": "task_45",
+    "task_63": "task_46",
+    "task_64": "task_50",
+    "task_65": "task_49",
+    "task_66": "task_51",
+    "task_67": "NA",       # skip task completely
+}
+
 # Create mappings from task_id to categories
 print("Creating task category mappings...")
 
@@ -285,7 +356,19 @@ def process_episodes(video_root_dir, json_root_dir, ep_id_num_interactions_map, 
             valid_ep_ids = [str(line.strip()) for line in file if line.strip().isdigit()]
             episode_ids = [ep_id for ep_id in episode_ids if ep_id in valid_ep_ids]
 
+    # Create mapping from old episode IDs to new continuous IDs
+    old_to_new_episode_id_mapping = {}
+    new_episode_counter = 1
+    
+    # Sort episode IDs to ensure consistent ordering
+    episode_ids.sort(key=int)
+    
     for ep_id in tqdm(episode_ids):
+        # Create new continuous episode ID
+        new_ep_id = str(new_episode_counter)
+        old_to_new_episode_id_mapping[ep_id] = new_ep_id
+        new_episode_counter += 1
+        
         # Skip non-directory entries
         # assert os.path.isdir(os.path.join(video_root_dir, ep_id)), f"Episode {ep_id} is not a directory"
                                         
@@ -302,9 +385,6 @@ def process_episodes(video_root_dir, json_root_dir, ep_id_num_interactions_map, 
         json_ep_dir = os.path.join(json_root_dir, f"ep_id_{ep_id}")
         assert os.path.exists(json_ep_dir), f"No JSON directory found for episode {ep_id}"
         
-        # Define multi-goal tasks that require selecting frames for each entity
-        multi_goal_tasks = ["task_12", "task_13", "task_14", "task_15", "task_16", "task_17", "task_18", "task_19", "task_20"]
-
         # Process each task JSON file
         for task_file in os.listdir(json_ep_dir):
             if not task_file.endswith('.json'):
@@ -372,9 +452,28 @@ def process_episodes(video_root_dir, json_root_dir, ep_id_num_interactions_map, 
                     keyframe_lists = [keyframe_indices]  # Single list inside a list
                 else:
                     keyframe_lists = [[]]  # Empty list inside a list
-                        
-            # Use the mapped indices for the output
-            output_text = json.dumps(keyframe_lists)
+                    
+            # Map the original keyframe indices to the subsampled indices if we are uploading a subsampled video dataset
+            if "original_to_subsampled_idx" in task_data:
+                original_to_subsampled_idx = task_data["original_to_subsampled_idx"]
+                mapped_keyframe_lists = []
+                for sublist in keyframe_lists:
+                    mapped_sublist = []
+                    for idx in sublist:
+                        if idx == -1:
+                            print(f"Warning: Found idx -1 in task {task_id}, episode {ep_id}. Keeping as -1.")
+                            mapped_sublist.append(-1)
+                        else:
+                            mapped_sublist.append(int(original_to_subsampled_idx[str(idx)]))
+                    mapped_keyframe_lists.append(mapped_sublist)
+                            
+                # Use the mapped indices for the output
+                output_text = json.dumps(mapped_keyframe_lists)
+            else:
+                # Use the original frame indices if uploading full length video dataset
+                output_text = json.dumps(keyframe_lists)
+
+            # Get the task goal
             task_goal = task_data["task_instruction"]
             
             # Fix specific text in task 57 goal
@@ -385,27 +484,61 @@ def process_episodes(video_root_dir, json_root_dir, ep_id_num_interactions_map, 
             high_level_category = task_id_to_high_level_category.get(task_id, "NA")
             low_level_category = task_id_to_low_level_category.get(task_id, "NA")
             
+            # Skip uploading the task if the high level/low level category is NA
+            if high_level_category == "NA" or low_level_category == "NA":
+                continue
+            
+            # Skip tasks that are in the task_id_to_skip list
+            if task_id in task_id_to_skip:
+                continue
+                        
+            # Override the existing task_id in the json episodes with the new task_id as per Table 3 of paper appendix
+            assert task_id in old_task_id_to_new_task_id, f"Task {task_id} not found in old_task_id_to_new_task_id"
+            new_task_id = old_task_id_to_new_task_id[task_id]
+            
             # Create entry with direct video file path and category information
             entry = {
-                "ep_id": f"ep_{ep_id}",
+                "ep_id": f"ep_{new_ep_id}",  # Use new continuous episode ID
                 "video": video_path,  # Direct path - no dictionary wrapper
                 "question": f"The robot's goal is: {task_goal}",
                 "answer": output_text,
-                "task_id": task_id,
+                "task_id": new_task_id,
                 "high_level_category": high_level_category,
                 "low_level_category": low_level_category,
-                "num_interactions": ep_id_num_interactions_map[ep_id]
+                "num_interactions": ep_id_num_interactions_map[ep_id]  # Still use original ep_id for lookup
             }
                             
             dataset_entries.append(entry)
+            
+        # For each episode_id, we append an extra entry for task_id 41: Navigate to a room that you didnt visit yesterday since the oracle solution for this task is not generated from simulator so there is no json file for it
+        entry = {
+            "ep_id": f"ep_{new_ep_id}",  # Use new continuous episode ID
+            "video": video_path,  # Direct path - no dictionary wrapper
+            "question": f"The robot's goal is: Navigate to a room that you did not visit yesterday.",
+            "answer": json.dumps([[-1]]),
+            "task_id": old_task_id_to_new_task_id["task_41"],
+            "high_level_category": task_id_to_high_level_category["task_41"],
+            "low_level_category": task_id_to_low_level_category["task_41"],
+            "num_interactions": ep_id_num_interactions_map[ep_id]  # Still use original ep_id for lookup
+        }
+        dataset_entries.append(entry)
 
-    return dataset_entries
+    return dataset_entries, old_to_new_episode_id_mapping
 
 # Process train and validation data separately
 print("Processing training data...")
-train_entries = process_episodes(train_video_root_dir, train_json_root_dir, train_ep_id_num_interactions, valid_tasks_train, train_valid_eps_filepath)
+train_entries, train_episode_mapping = process_episodes(train_video_root_dir, train_json_root_dir, train_ep_id_num_interactions, valid_tasks_train, train_valid_eps_filepath)
 print("Processing validation data...")
-val_entries = process_episodes(val_video_root_dir, val_json_root_dir, val_ep_id_num_interactions, valid_tasks_val, None)
+val_entries, val_episode_mapping = process_episodes(val_video_root_dir, val_json_root_dir, val_ep_id_num_interactions, valid_tasks_val, None)
+
+# Combine episode mappings
+all_episode_mappings = {
+    "train": train_episode_mapping,
+    "validation": val_episode_mapping
+}
+
+print(f"Created {len(train_entries)} train entries with {len(train_episode_mapping)} episodes")
+print(f"Created {len(val_entries)} val entries with {len(val_episode_mapping)} episodes")
 
 # Create a videos folder in the current directory
 print(f"Output directory: {output_dir}")
@@ -577,6 +710,12 @@ dataset_dict = DatasetDict({
 # Save the dataset
 dataset_dict.save_to_disk(output_dir)
 
+# Save episode ID mappings
+episode_mapping_path = os.path.join(output_dir, "episode_id_mappings.json")
+with open(episode_mapping_path, 'w') as f:
+    json.dump(all_episode_mappings, f, indent=2)
+
+print(f"Episode ID mappings saved to {episode_mapping_path}")
 print(f"Dataset created with {len(train_dataset)} training examples and {len(val_dataset)} validation examples")
 
 # Zip the videos folder
@@ -658,5 +797,20 @@ except Exception as e:
     print(f"Error uploading videos zip file: {e}")
     print(f"Make sure the repository '{repo_name}' exists and you have write access to it")
 
+# Upload the episode mapping file separately using HfApi
+print("Uploading episode ID mappings...")
+try:
+    api.upload_file(
+        path_or_fileobj=episode_mapping_path,
+        path_in_repo="episode_id_mappings.json",
+        repo_id=repo_name,
+        repo_type="dataset",
+        commit_message="Add episode ID mappings"
+    )
+    print("Episode ID mappings successfully uploaded")
+except Exception as e:
+    print(f"Error uploading episode ID mappings: {e}")
+
 print(f"Dataset and videos uploaded to HuggingFace: https://huggingface.co/datasets/{repo_name}")
 print(f"Videos are available as a zip file in the repository")
+print(f"Episode ID mappings are available as episode_id_mappings.json in the repository")

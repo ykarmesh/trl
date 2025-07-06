@@ -12,7 +12,6 @@ import time
 from datasets import disable_caching
 import re
 import tempfile
-import shutil
 import logging
 
 # Define paths for full dataset
@@ -548,141 +547,70 @@ print(f"Output directory exists: {os.path.exists(output_dir)}")
 os.makedirs(output_dir, exist_ok=True)
 print(f"Created output directory: {output_dir}")
 
-videos_folder = os.path.join(output_dir, "videos")
-print(f"Videos folder path: {videos_folder}")
-
-os.makedirs(videos_folder, exist_ok=True)
-print(f"Created videos folder: {videos_folder}")
-print(f"Videos folder exists: {os.path.exists(videos_folder)}")
-
-print("Copying videos to local folder...")
-
-# Collect all unique video paths from both train and val entries
-print("Collecting unique video paths...")
-all_video_paths = set()
-train_video_paths = set()
-val_video_paths = set()
-
-# Count total entries vs unique videos for debugging
-total_train_entries = len(train_entries)
-total_val_entries = len(val_entries)
-
-for entry in train_entries:
-    all_video_paths.add(entry["video"])
-    train_video_paths.add(entry["video"])
-
-for entry in val_entries:
-    all_video_paths.add(entry["video"])
-    val_video_paths.add(entry["video"])
-
-print(f"Total train entries: {total_train_entries}, Unique train videos: {len(train_video_paths)}")
-print(f"Total val entries: {total_val_entries}, Unique val videos: {len(val_video_paths)}")
-print(f"Total unique videos across both splits: {len(all_video_paths)}")
-
-# Check for overlap between train and val video paths
-overlap_videos = train_video_paths.intersection(val_video_paths)
-if overlap_videos:
-    print(f"WARNING: Found {len(overlap_videos)} videos that appear in both train and val splits")
-else:
-    print("No video overlap between train and val splits - good!")
-
-# DEBUG: Limit to 10 videos from train and 10 videos from val for testing
-debug_train_video_paths = list(train_video_paths)
-debug_val_video_paths = list(val_video_paths)
-debug_video_paths = debug_train_video_paths + debug_val_video_paths
-
-print(f"DEBUG: Processing {len(debug_video_paths)} videos total: {len(debug_train_video_paths)} from train, {len(debug_val_video_paths)} from val")
-
-print(f"DEBUG: {len(debug_train_video_paths)} train videos, {len(debug_val_video_paths)} val videos")
-
-# Create train and val subfolders
-train_videos_folder = os.path.join(videos_folder, "train")
-val_videos_folder = os.path.join(videos_folder, "val")
-os.makedirs(train_videos_folder, exist_ok=True)
-os.makedirs(val_videos_folder, exist_ok=True)
-
-# Copy videos and create a mapping from old paths to new relative paths
-video_path_mapping = {}
-copied_count = 0
-
-# Copy train videos
-for video_path in tqdm(debug_train_video_paths, desc="Copying train videos"):
-    # Extract filename from the original path
-    filename = os.path.basename(video_path)
-    
-    # Create new path in the train videos folder
-    new_video_path = os.path.join(train_videos_folder, filename)
-    
-    # If filename already exists, make it unique by adding episode info
-    if os.path.exists(new_video_path):
-        # Extract episode info from the original path to make filename unique
-        path_parts = video_path.split(os.sep)
-        for part in path_parts:
-            if part.startswith("ep_id_"):
-                episode_info = part
-                break
-        else:
-            episode_info = f"copy_{copied_count}"
-        
-        name, ext = os.path.splitext(filename)
-        filename = f"{name}_{episode_info}{ext}"
-        new_video_path = os.path.join(train_videos_folder, filename)
-    
-    # Copy the video file
-    shutil.copy2(video_path, new_video_path)
-    
-    # Store the mapping from old absolute path to new relative path
-    relative_path = os.path.join("videos", "train", filename)
-    video_path_mapping[video_path] = relative_path
-    copied_count += 1
-
-# Copy val videos
-for video_path in tqdm(debug_val_video_paths, desc="Copying val videos"):
-    # Extract filename from the original path
-    filename = os.path.basename(video_path)
-    
-    # Create new path in the val videos folder
-    new_video_path = os.path.join(val_videos_folder, filename)
-    
-    # If filename already exists, make it unique by adding episode info
-    if os.path.exists(new_video_path):
-        # Extract episode info from the original path to make filename unique
-        path_parts = video_path.split(os.sep)
-        for part in path_parts:
-            if part.startswith("ep_id_"):
-                episode_info = part
-                break
-        else:
-            episode_info = f"copy_{copied_count}"
-        
-        name, ext = os.path.splitext(filename)
-        filename = f"{name}_{episode_info}{ext}"
-        new_video_path = os.path.join(val_videos_folder, filename)
-    
-    # Copy the video file
-    shutil.copy2(video_path, new_video_path)
-    
-    # Store the mapping from old absolute path to new relative path
-    relative_path = os.path.join("videos", "val", filename)
-    video_path_mapping[video_path] = relative_path
-    copied_count += 1
-
-print(f"Copied {copied_count} unique videos to {videos_folder} (train: {len(debug_train_video_paths)}, val: {len(debug_val_video_paths)})")
-
 # Update video paths in dataset entries to use relative paths
-# Only update entries that have videos we actually copied
-print("Updating video paths to relative paths...")
+print("Copying videos and updating video paths to relative paths...")
+
+# Create final videos folder with new ep_id names
+final_videos_folder = os.path.join(output_dir, "videos")
+final_train_videos_folder = os.path.join(final_videos_folder, "train")
+final_val_videos_folder = os.path.join(final_videos_folder, "val")
+os.makedirs(final_train_videos_folder, exist_ok=True)
+os.makedirs(final_val_videos_folder, exist_ok=True)
+
 updated_train_entries = []
-for entry in train_entries:
-    if entry["video"] in video_path_mapping:
-        entry["video"] = video_path_mapping[entry["video"]]
+train_new_ep_id_to_old_video_path_map = {}
+for entry in tqdm(train_entries, desc="Copying train videos"):
+    # Get the new ep_id from the entry
+    new_ep_id = entry["ep_id"]  # This is already "ep_X" format
+    new_video_name = f"{new_ep_id}.mp4"
+    
+    # Copy video from original path to new videos folder with new name
+    original_video_path = entry["video"]  # This is the original absolute path
+    new_video_path = os.path.join(final_train_videos_folder, new_video_name)
+    
+    # Check that all new ep_ids have the same original video path
+    if new_ep_id in train_new_ep_id_to_old_video_path_map:
+        assert original_video_path == train_new_ep_id_to_old_video_path_map[new_ep_id], f"A different original video path {original_video_path} does not match old video path {train_new_ep_id_to_old_video_path_map[new_ep_id]} for new ep_id {new_ep_id}"
+        # Update entry to point to new video file
+        entry["video"] = f"videos/train/{new_video_name}"
         updated_train_entries.append(entry)
+    
+    # Only save the video if it doesn't already exist
+    else:
+        train_new_ep_id_to_old_video_path_map[new_ep_id] = original_video_path
+        # Only save the video if it doesn't already exist
+        if os.path.exists(original_video_path):
+            shutil.copy2(original_video_path, new_video_path)
+            # Update entry to point to new video file
+            entry["video"] = f"videos/train/{new_video_name}"
+            updated_train_entries.append(entry)
 
 updated_val_entries = []
-for entry in val_entries:
-    if entry["video"] in video_path_mapping:
-        entry["video"] = video_path_mapping[entry["video"]]
+val_new_ep_id_to_old_video_path_map = {}
+for entry in tqdm(val_entries, desc="Copying validation videos"):
+    # Get the new ep_id from the entry
+    new_ep_id = entry["ep_id"]  # This is already "ep_X" format
+    new_video_name = f"{new_ep_id}.mp4"
+    
+    # Copy video from original path to new videos folder with new name
+    original_video_path = entry["video"]  # This is the original absolute path
+    new_video_path = os.path.join(final_val_videos_folder, new_video_name)
+    
+    # Check that all new ep_ids have the same original video path
+    if new_ep_id in val_new_ep_id_to_old_video_path_map:
+        assert original_video_path == val_new_ep_id_to_old_video_path_map[new_ep_id], f"A different original video path {original_video_path} does not match old video path {val_new_ep_id_to_old_video_path_map[new_ep_id]} for new ep_id {new_ep_id}"
+        # Update entry to point to new video file
+        entry["video"] = f"videos/val/{new_video_name}"
         updated_val_entries.append(entry)
+    
+    # Only save the video if it doesn't already exist
+    else:
+        val_new_ep_id_to_old_video_path_map[new_ep_id] = original_video_path
+        if os.path.exists(original_video_path):
+            shutil.copy2(original_video_path, new_video_path)
+            # Update entry to point to new video file
+            entry["video"] = f"videos/val/{new_video_name}"
+            updated_val_entries.append(entry)
 
 print(f"DEBUG: Filtered to {len(updated_train_entries)} train entries and {len(updated_val_entries)} val entries")
 
@@ -722,7 +650,7 @@ print(f"Dataset created with {len(train_dataset)} training examples and {len(val
 print("Creating zip file of videos...")
 videos_zip_path = os.path.join(output_dir, "videos.zip")
 with zipfile.ZipFile(videos_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-    for root, dirs, files in os.walk(videos_folder):
+    for root, dirs, files in os.walk(final_videos_folder):
         for file in tqdm(files, desc="Zipping videos"):
             file_path = os.path.join(root, file)
             arcname = os.path.relpath(file_path, output_dir)

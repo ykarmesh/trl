@@ -15,25 +15,36 @@ import tempfile
 import logging
 
 # Define paths for full dataset
-train_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/interaction_videos"
-train_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/vlm_inference_results"
-val_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/interaction_videos"
-val_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/vlm_inference_results"
-train_valid_eps_filepath = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/episodes_to_keep.txt"
-output_dir = "/coc/testnvme/yali30/code/trl/memorybench/arxiv_data_full_fixed"
+# train_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/interaction_videos"
+# train_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/vlm_inference_results"
+# val_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/interaction_videos"
+# val_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/vlm_inference_results"
+# train_valid_eps_filepath = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/episodes_to_keep.txt"
+# output_dir = "/coc/testnvme/yali30/code/trl/memorybench/nips_dnb_release_fixed"
 
 # Define paths for subsampled dataset
-# train_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/subsampled_dataset_96/interaction_videos"
-# train_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/subsampled_dataset_96/vlm_inference_results"
-# val_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/subsampled_dataset_96/interaction_videos"
-# val_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/subsampled_dataset_96/vlm_inference_results"
-# train_valid_eps_filepath = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/episodes_to_keep.txt"
-# output_dir = "/coc/testnvme/yali30/code/trl/memorybench/arxiv_data_subsampled_96_fixed"
+train_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/subsampled_dataset_32/interaction_videos"
+train_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/subsampled_dataset_32/vlm_inference_results"
+val_video_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/subsampled_dataset_32/interaction_videos"
+val_json_root_dir = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_val_evals_dataset_v3_final/subsampled_dataset_32/vlm_inference_results"
+train_valid_eps_filepath = "/srv/flash1/yali30/code/memorybench_karmesh/runs/arxiv/oracle_train_evals_dataset_v3/episodes_to_keep.txt"
+output_dir = "/coc/testnvme/yali30/code/trl/memorybench/iclr_grpo_subsampled_32_fixed"
 
 # Original dataset paths
 train_dataset_path = "/srv/flash1/yali30/code/memorybench_karmesh/new_data/balanced_mmbench_dataset_v3/train/combined_episodes-with_init_and_final_poses_pddl_verified.json.gz"
 val_dataset_path = "/srv/flash1/yali30/code/memorybench_karmesh/new_data/balanced_mmbench_dataset_v3/val/final_v3-with_init_and_final_poses.json.gz"  # Update this path
 # yali30/findingdory-normalized-subsampled-48
+
+# list of online evals blacklisted episodes that need to be skipped (in addition to those that werent already skipped)
+online_evals_blacklisted_episodes = {
+    "189": ['task_11'],
+    "524": ['task_14'],
+    "385": ['task_15'],
+    "707": ['task_15'],
+    "189": ['task_12'],
+    "473": ['task_14'],
+    "684": ['task_15']
+}
 
 # list of valid tasks
 valid_tasks_train = [
@@ -328,7 +339,7 @@ for ep in val_original_dataset['episodes']:
     val_ep_id_num_interactions[ep['episode_id']] = len(ep['candidate_objects'])
 
 # Create a function to process episodes and create dataset entries
-def process_episodes(video_root_dir, json_root_dir, ep_id_num_interactions_map, valid_tasks, valid_eps_filepath=None):
+def process_episodes(video_root_dir, json_root_dir, ep_id_num_interactions_map, valid_tasks, valid_eps_filepath=None, ignore_blacklisted_episodes=False):
     dataset_entries = []
     
     # Find all video files and extract episode IDs
@@ -394,6 +405,11 @@ def process_episodes(video_root_dir, json_root_dir, ep_id_num_interactions_map, 
             if task_id not in valid_tasks:
                 # print(f"skipping {task_id} because it is not in the valid_tasks list")
                 continue
+
+            # skip episodes that are in the online evals blacklisted episodes list
+            if ep_id in online_evals_blacklisted_episodes.keys() and 'val' in video_root_dir:
+                if task_id in online_evals_blacklisted_episodes[ep_id]:
+                    continue
             
             task_path = os.path.join(json_ep_dir, task_file)
             with open(task_path, 'r') as f:
@@ -528,7 +544,7 @@ def process_episodes(video_root_dir, json_root_dir, ep_id_num_interactions_map, 
 print("Processing training data...")
 train_entries, train_episode_mapping = process_episodes(train_video_root_dir, train_json_root_dir, train_ep_id_num_interactions, valid_tasks_train, train_valid_eps_filepath)
 print("Processing validation data...")
-val_entries, val_episode_mapping = process_episodes(val_video_root_dir, val_json_root_dir, val_ep_id_num_interactions, valid_tasks_val, None)
+val_entries, val_episode_mapping = process_episodes(val_video_root_dir, val_json_root_dir, val_ep_id_num_interactions, valid_tasks_val, None, ignore_blacklisted_episodes=True)
 
 # Combine episode mappings
 all_episode_mappings = {
@@ -689,7 +705,7 @@ try:
     dataset_dict.push_to_hub(
         repo_name,
         private=False,  # Set to True if you want a private dataset
-        commit_message="Upload MemoryBench dataset with videos"
+        commit_message="Upload FindingDory dataset with videos"
     )
     print("Dataset successfully pushed to HuggingFace Hub")
 except Exception as e:

@@ -149,7 +149,10 @@ memorybench/generated_data
 memorybench/combined_eval_results
 memorybench/final_arxiv_data*
 memorybench/arxiv_data*
+memorybench/iclr_grpo_subsampled_32_fixed*
+memorybench/nips_dnb_release_*
 images/
 slurm_logs/
 runs/
 triton_cache/
+memorybench/README.md
